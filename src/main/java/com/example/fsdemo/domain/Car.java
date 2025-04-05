@@ -12,7 +12,7 @@ public class Car {
 
     private int modelYear, price;
 
-    @Column(name = "explanation", nullable = false, length = 512)
+    @Column(name = "explanation", nullable = true, length = 512)
     private String description;
 
     public Car() {
