@@ -1,9 +1,6 @@
 package com.example.fsdemo;
 
-import com.example.fsdemo.domain.Car;
-import com.example.fsdemo.domain.CarRepository;
-import com.example.fsdemo.domain.Owner;
-import com.example.fsdemo.domain.OwnerRepository;
+import com.example.fsdemo.domain.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
@@ -19,10 +16,12 @@ public class FsDemoApplication implements CommandLineRunner {
 
     private final CarRepository repository;
     private final OwnerRepository orepository;
+    private final AppUserRepository urepository;
 
-    public FsDemoApplication(CarRepository repository, OwnerRepository orepository) {
+    public FsDemoApplication(CarRepository repository, OwnerRepository orepository, AppUserRepository urepository) {
         this.repository = repository;
         this.orepository = orepository;
+        this.urepository = urepository;
     }
 
     public static void main(String[] args) {
