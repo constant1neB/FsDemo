@@ -19,6 +19,7 @@ public class Car {
     @JoinColumn(name = "owner")
     private Owner owner;
 
+
     public Owner getOwner() {
         return owner;
     }
