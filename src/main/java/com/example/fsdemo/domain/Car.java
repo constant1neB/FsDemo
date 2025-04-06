@@ -12,7 +12,7 @@ public class Car {
 
     private int modelYear, price;
 
-    @Column(name = "explanation", nullable = true, length = 512)
+    @Column(name = "description", nullable = true, length = 512)
     private String description;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -89,7 +89,8 @@ public class Car {
         this.price = price;
     }
     public String getDescription() {
-        return description;
+        // To avoid possible NPEs getter returns "" instead of NULL
+        return (this.description == null) ? "" : this.description;
     }
     public void setDescription(String description) {
         this.description = description;
