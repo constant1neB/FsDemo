@@ -62,4 +62,36 @@ public class Car {
     public void setModel(String model) {
         this.model = model;
     }
+
+    public String getColor() {
+        return color;
+    }
+    public void setColor(String color) {
+        this.color = color;
+    }
+
+    public String getRegistrationNumber() {
+        return registrationNumber;
+    }
+    public void setRegistrationNumber(String registrationNumber) {
+        this.registrationNumber = registrationNumber;
+    }
+    public int getModelYear() {
+        return modelYear;
+    }
+    public void setModelYear(int modelYear) {
+        this.modelYear = modelYear;
+    }
+    public int getPrice() {
+        return price;
+    }
+    public void setPrice(int price) {
+        this.price = price;
+    }
+    public String getDescription() {
+        return description;
+    }
+    public void setDescription(String description) {
+        this.description = description;
+    }
 }
