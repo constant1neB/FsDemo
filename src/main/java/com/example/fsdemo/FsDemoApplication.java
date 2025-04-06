@@ -41,7 +41,7 @@ public class FsDemoApplication implements CommandLineRunner {
                 "Red",
                 "ADF-1121",
                 2023,
-                5900,
+                59000,
                 owner1));
         repository.save(new Car(
                 "Nissan",
