@@ -22,7 +22,7 @@ public class JwtService {
 
     @Value("${jwt.expiration.ms:21600000}")
     private long expirationTime;
-    static final String PREFIX = "Bearer";
+    static final String PREFIX = "Bearer ";
 
     private final SecretKey key;
 
@@ -39,21 +39,21 @@ public class JwtService {
                 .expiration(Date.from(now.plus(Duration.ofMillis(expirationTime))))
                 .signWith(key)
                 .compact();
-        return " " + token;
+        return token;
     }
 
     public String getAuthUser(HttpServletRequest request) {
         String header = request.getHeader(HttpHeaders.AUTHORIZATION);
 
-        if (header != null && header.startsWith(PREFIX + " ")) { // Check prefix
-            String token = header.substring(PREFIX.length() + 1).trim();
+        if (header != null && header.startsWith(PREFIX)) {
+            String token = header.substring(PREFIX.length());
             try {
                 return Jwts.parser()
                         .verifyWith(this.key)
                         .build()
                         .parseSignedClaims(token)
-                        .getPayload().
-                        getSubject();
+                        .getPayload()
+                        .getSubject();
             } catch (JwtException e) {
                 log.warn("JWT validation failed: {}", e.getMessage());
                 return null;
