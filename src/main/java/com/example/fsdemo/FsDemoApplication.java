@@ -20,7 +20,8 @@ public class FsDemoApplication implements CommandLineRunner {
     private final AppUserRepository urepository;
     private final PasswordEncoder argon2Encoder;
 
-    public FsDemoApplication(CarRepository repository, OwnerRepository orepository, AppUserRepository urepository, PasswordEncoder argon2Encoder) {
+    public FsDemoApplication(CarRepository repository, OwnerRepository orepository,
+                             AppUserRepository urepository, PasswordEncoder argon2Encoder) {
         this.repository = repository;
         this.orepository = orepository;
         this.urepository = urepository;
@@ -38,30 +39,6 @@ public class FsDemoApplication implements CommandLineRunner {
         Owner owner1 = new Owner("John", "Doe");
         Owner owner2 = new Owner("Jane", "Eyre");
         orepository.saveAll(Arrays.asList(owner1, owner2));
-        repository.save(new Car(
-                "Ford",
-                "Mustang",
-                "Red",
-                "ADF-1121",
-                2023,
-                59000,
-                owner1));
-        repository.save(new Car(
-                "Nissan",
-                "Leaf",
-                "White",
-                "SSJ-3002",
-                2020,
-                29000,
-                owner2));
-        repository.save(new Car(
-                "Toyota",
-                "Hilux",
-                "White",
-                "KKO-0212",
-                2022,
-                39000,
-                owner2));
         String user1pwd = "password";
         String hashedUser1Pwd = argon2Encoder.encode(user1pwd);
         urepository.save(new AppUser("user1", hashedUser1Pwd, "user", "user@example.com"));
