@@ -63,14 +63,18 @@ public class VideoController {
 
         // 3. Sanitize Filename (Satisfies path traversal test)
         String originalFilenameRaw = file.getOriginalFilename();
-        if (originalFilenameRaw == null) {
+        if (originalFilenameRaw == null || originalFilenameRaw.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File name is missing.");
         }
+
+        if (originalFilenameRaw.matches(".*\\p{Cntrl}.*"))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid characters in filename.");
+
         String sanitizedFilename = StringUtils.cleanPath(originalFilenameRaw);
 
         log.debug("Raw filename: '{}', Sanitized filename: '{}'", originalFilenameRaw, sanitizedFilename);
 
-        if (sanitizedFilename.contains("..")) {
+        if (sanitizedFilename.contains("..") || sanitizedFilename.startsWith("/") || sanitizedFilename.startsWith("~")) {
             log.warn("Attempted path traversal by user {}: {}", authentication.getName(), originalFilenameRaw);
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid characters in filename.");
         }
@@ -106,7 +110,7 @@ public class VideoController {
         log.debug("Attempting to save video metadata: ID={}, Owner={}, Filename={}, Desc={}, Path={}, Size={}",
                 video.getId(), // Will be null before save
                 video.getOwner().getUsername(),
-                video.getOriginalFilename(),
+                video.getOriginalFilename(), //after sanitization
                 video.getDescription(),
                 video.getStoragePath(),
                 video.getFileSize());

@@ -1,7 +1,6 @@
 package com.example.fsdemo.domain;
 
 import jakarta.persistence.*;
-import jakarta.validation.constraints.NotNull; // Added for consistency
 
 import java.time.Instant;
 
