@@ -75,6 +75,10 @@ public class VideoController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid characters in filename.");
         }
 
+        // Explicit size validation
+        if (file.getSize() > 100 * 1024 * 1024) { // 100MB
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "File size exceeds maximum limit of 100MB");
+        }
 
         String storagePath;
         try {

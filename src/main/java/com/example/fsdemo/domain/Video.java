@@ -29,7 +29,6 @@ public class Video {
     private Instant uploadDate; // Use Instant for timestamp
 
     @Column(nullable = false, unique = true) // Path must be unique
-    @NotNull
     private String storagePath;
 
     @Column(nullable = false)
