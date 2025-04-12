@@ -16,7 +16,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
@@ -55,7 +54,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @Transactional
 @MockitoSettings(strictness = Strictness.LENIENT)
+
 class VideoControllerTest {
+
 
     // Test constants
     private static final String TEST_USERNAME = "testuploader";
@@ -81,7 +82,7 @@ class VideoControllerTest {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
-    @MockBean
+    @Autowired
     private VideoStorageService storageService;
 
     private String jwtToken;
