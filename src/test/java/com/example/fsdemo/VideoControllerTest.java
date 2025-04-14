@@ -683,6 +683,72 @@ class VideoControllerTest {
         verify(videoRepository).findByOwnerUsername(TEST_USERNAME);
     }
 
+    @Test
+    void getVideoDetails_whenAllowed_shouldReturnVideoResponse() throws Exception {
+        // Arrange
+        Long videoId = 1L;
+        String generatedFilename = "uuid-details.mp4";
+        String description = "Details Test Video";
+        String storagePath = "path/to/" + generatedFilename;
+        long fileSize = 12345L;
+
+        Video video = new Video(testUser, generatedFilename, description, Instant.now(), storagePath, fileSize, VIDEO_MIME_TYPE);
+        video.setId(videoId);
+
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
+        given(videoSecurityService.canView(videoId, TEST_USERNAME)).willReturn(true); // User is allowed
+
+        // Act & Assert
+        mockMvc.perform(addAuth(get("/api/videos/{id}", videoId)))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.id").value(videoId))
+                .andExpect(jsonPath("$.generatedFilename").value(generatedFilename))
+                .andExpect(jsonPath("$.description").value(description))
+                .andExpect(jsonPath("$.ownerUsername").value(TEST_USERNAME))
+                .andExpect(jsonPath("$.fileSize").value(fileSize));
+
+        // Verify mocks
+        verify(videoRepository).findById(videoId);
+        verify(videoSecurityService).canView(videoId, TEST_USERNAME);
+    }
+
+    @Test
+    void getVideoDetails_whenVideoNotFound_shouldReturnNotFound() throws Exception {
+        // Arrange
+        Long videoId = 99L; // Non-existent ID
+        given(videoRepository.findById(videoId)).willReturn(Optional.empty());
+
+        // Act & Assert
+        mockMvc.perform(addAuth(get("/api/videos/{id}", videoId)))
+                .andExpect(status().isNotFound());
+
+        // Verify mocks
+        verify(videoRepository).findById(videoId);
+        verify(videoSecurityService, never()).canView(anyLong(), anyString()); // Security check shouldn't happen
+    }
+
+    @Test
+    void getVideoDetails_whenNotAllowed_shouldReturnForbidden() throws Exception {
+        // Arrange
+        Long videoId = 2L;
+        String generatedFilename = "private-video.mp4";
+        AppUser anotherOwner = new AppUser("another", "pass", "U", "a@a.com");
+        Video video = new Video(anotherOwner, generatedFilename, "Private", Instant.now(), "path/private", 100L, VIDEO_MIME_TYPE);
+        video.setId(videoId);
+
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
+        given(videoSecurityService.canView(videoId, TEST_USERNAME)).willReturn(false); // User is NOT allowed
+
+        // Act & Assert
+        mockMvc.perform(addAuth(get("/api/videos/{id}", videoId)))
+                .andExpect(status().isForbidden()); // Expect 403 Forbidden
+
+        // Verify mocks
+        verify(videoRepository).findById(videoId);
+        verify(videoSecurityService).canView(videoId, TEST_USERNAME);
+    }
+
     // ============ HELPER METHODS ============ //
 
     /**
