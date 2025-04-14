@@ -24,6 +24,7 @@ import java.util.List;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.matchesPattern;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
@@ -58,10 +59,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /**
@@ -747,6 +744,98 @@ class VideoControllerTest {
         // Verify mocks
         verify(videoRepository).findById(videoId);
         verify(videoSecurityService).canView(videoId, TEST_USERNAME);
+    }
+
+    @Test
+    void deleteVideo_whenOwner_shouldDeleteFromStorageAndDbAndReturnNoContent() throws Exception {
+        // Arrange
+        Long videoId = 1L;
+        String storagePath = "path/to/delete/video.mp4"; // Needs a storage path
+        Video videoToDelete = new Video(testUser, "delete-uuid.mp4", "To Delete", Instant.now(), storagePath, 100L, VIDEO_MIME_TYPE);
+        videoToDelete.setId(videoId);
+
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(videoToDelete));
+        given(videoSecurityService.canDelete(videoId, TEST_USERNAME)).willReturn(true); // User can delete
+
+        // Mock void methods
+        doNothing().when(storageService).delete(storagePath);
+        doNothing().when(videoRepository).delete(videoToDelete);
+
+        // Act & Assert
+        mockMvc.perform(addAuth(delete("/api/videos/{id}", videoId)))
+                .andExpect(status().isNoContent()); // Expect 204 No Content
+
+        // Verify mocks
+        verify(videoRepository).findById(videoId);
+        verify(videoSecurityService).canDelete(videoId, TEST_USERNAME);
+        verify(storageService).delete(storagePath); // Verify storage deletion called
+        verify(videoRepository).delete(videoToDelete); // Verify repository deletion called
+    }
+
+    @Test
+    void deleteVideo_whenVideoNotFound_shouldReturnNotFound() throws Exception {
+        // Arrange
+        Long videoId = 99L;
+        given(videoRepository.findById(videoId)).willReturn(Optional.empty());
+
+        // Act & Assert
+        mockMvc.perform(addAuth(delete("/api/videos/{id}", videoId)))
+                .andExpect(status().isNotFound());
+
+        // Verify mocks
+        verify(videoRepository).findById(videoId);
+        verify(videoSecurityService, never()).canDelete(anyLong(), anyString());
+        verify(storageService, never()).delete(anyString());
+        verify(videoRepository, never()).delete(any(Video.class));
+    }
+
+    @Test
+    void deleteVideo_whenNotOwner_shouldReturnForbidden() throws Exception {
+        // Arrange
+        Long videoId = 2L;
+        AppUser anotherOwner = new AppUser("another", "pass", "U", "a@a.com");
+        Video video = new Video(anotherOwner, "other-del.mp4", "Other Desc", Instant.now(), "path/other-del", 100L, VIDEO_MIME_TYPE);
+        video.setId(videoId);
+
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
+        given(videoSecurityService.canDelete(videoId, TEST_USERNAME)).willReturn(false); // Cannot delete
+
+        // Act & Assert
+        mockMvc.perform(addAuth(delete("/api/videos/{id}", videoId)))
+                .andExpect(status().isForbidden());
+
+        // Verify mocks
+        verify(videoRepository).findById(videoId);
+        verify(videoSecurityService).canDelete(videoId, TEST_USERNAME);
+        verify(storageService, never()).delete(anyString());
+        verify(videoRepository, never()).delete(any(Video.class));
+    }
+
+    @Test
+    void deleteVideo_whenStorageDeleteFails_shouldReturnInternalServerErrorAndNotDeleteFromDb() throws Exception {
+        // Arrange
+        Long videoId = 1L;
+        String storagePath = "path/to/fail/delete.mp4";
+        Video videoToDelete = new Video(testUser, "fail-delete-uuid.mp4", "Fail Delete", Instant.now(), storagePath, 100L, VIDEO_MIME_TYPE);
+        videoToDelete.setId(videoId);
+
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(videoToDelete));
+        given(videoSecurityService.canDelete(videoId, TEST_USERNAME)).willReturn(true);
+
+        // Mock storageService.delete to throw an exception
+        doThrow(new VideoStorageException("Disk I/O error during delete"))
+                .when(storageService).delete(storagePath);
+
+        // Act & Assert
+        mockMvc.perform(addAuth(delete("/api/videos/{id}", videoId)))
+                .andExpect(status().isInternalServerError()); // Expect 500
+
+        // Verify mocks
+        verify(videoRepository).findById(videoId);
+        verify(videoSecurityService).canDelete(videoId, TEST_USERNAME);
+        verify(storageService).delete(storagePath); // Storage delete was attempted
+        // Crucially, verify DB delete was NOT called due to the exception + @Transactional rollback
+        verify(videoRepository, never()).delete(any(Video.class));
     }
 
     // ============ HELPER METHODS ============ //

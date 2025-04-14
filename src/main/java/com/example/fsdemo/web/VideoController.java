@@ -304,6 +304,69 @@ public class VideoController {
                 .body(resource);
     }
 
+    @DeleteMapping("/{id}")
+    @Transactional // Ensure atomicity (as much as possible with external storage)
+    public ResponseEntity<Void> deleteVideo(@PathVariable Long id, Authentication authentication) {
+        String username = authentication.getName();
+        log.debug("Delete video request received for ID: {} from user: {}", id, username);
+
+        // 1. Find Video by ID
+        Video video = videoRepository.findById(id)
+                .orElseThrow(() -> {
+                    log.warn("Delete failed: Video not found for ID: {}", id);
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Video not found");
+                });
+
+        // 2. Check Permissions (Deletion requires specific permission)
+        if (!videoSecurityService.canDelete(id, username)) {
+            log.warn("Delete forbidden for user: {} on video ID: {}", username, id);
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have permission to delete this video");
+        }
+
+        // 3. Delete from Storage Service FIRST
+        String storagePath = video.getStoragePath();
+        if (storagePath == null || storagePath.isBlank()) {
+            // This case shouldn't happen with current logic, but good to handle defensively
+            log.error("Delete failed: Video ID {} has missing or blank storage path.", id);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Video metadata is inconsistent (missing storage path)");
+        }
+
+        try {
+            log.trace("Attempting to delete video file from storage: {}", storagePath);
+            storageService.delete(storagePath);
+            log.info("Successfully deleted video file from storage: {}", storagePath);
+        } catch (VideoStorageException e) {
+            // If storage deletion fails, log the error and abort the operation.
+            // @Transactional will roll back the DB changes (though none have happened yet).
+            // We throw 500 because the system is in an inconsistent state (file might still exist).
+            log.error("Failed to delete video file from storage path: {} for video ID: {}", storagePath, id, e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete video file from storage", e);
+        } catch (Exception e) {
+            // Catch unexpected errors during deletion
+            log.error("Unexpected error during storage deletion for video ID: {}", id, e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected error during file deletion", e);
+        }
+
+
+        // 4. Delete from Database (only if storage deletion succeeded)
+        try {
+            videoRepository.delete(video);
+            log.info("Successfully deleted video metadata from database for ID: {}", id);
+        } catch (Exception e) {
+            // This is less likely if findById worked, but handle defensively.
+            // If this fails after storage deletion, we have an inconsistency.
+            // @Transactional should ideally roll back, but the file is already gone.
+            // This highlights the challenge of distributed transactions. Logging is critical.
+            log.error("Failed to delete video metadata from database for ID: {} after storage deletion.", id, e);
+            // Consider logging the inconsistency for manual cleanup.
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete video metadata after deleting file", e);
+        }
+
+
+        // 5. Return No Content
+        return ResponseEntity.noContent().build(); // Standard for successful DELETE
+    }
+
     /**
      * Checks if the provided MultipartFile starts with the expected MP4 magic bytes.
      * Reads only the necessary starting bytes.
