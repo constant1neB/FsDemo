@@ -4,11 +4,14 @@ import com.example.fsdemo.domain.AppUser;
 import com.example.fsdemo.domain.AppUserRepository;
 import com.example.fsdemo.domain.Video;
 import com.example.fsdemo.domain.VideoRepository;
+import com.example.fsdemo.service.VideoSecurityService;
 import com.example.fsdemo.service.VideoStorageException;
 import com.example.fsdemo.service.VideoStorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value; // For file size limit
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -24,6 +27,8 @@ import java.io.InputStream;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.UUID;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/videos")
@@ -34,6 +39,7 @@ public class VideoController {
     private final VideoStorageService storageService;
     private final VideoRepository videoRepository;
     private final AppUserRepository appUserRepository;
+    private final VideoSecurityService videoSecurityService;
 
     // Inject max file size from properties
     @Value("${video.upload.max-size-mb:40}") // Default 40MB
@@ -52,10 +58,12 @@ public class VideoController {
 
     public VideoController(VideoStorageService storageService,
                            VideoRepository videoRepository,
-                           AppUserRepository appUserRepository) {
+                           AppUserRepository appUserRepository,
+                           VideoSecurityService videoSecurityService) {
         this.storageService = storageService;
         this.videoRepository = videoRepository;
         this.appUserRepository = appUserRepository;
+        this.videoSecurityService = videoSecurityService;
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -189,6 +197,81 @@ public class VideoController {
         return ResponseEntity.status(HttpStatus.CREATED).body(responseDto);
     }
 
+    @GetMapping
+    public ResponseEntity<List<VideoResponse>> listUserVideos(Authentication authentication) {
+        String username = authentication.getName();
+        log.debug("List videos request received for user: {}", username);
+
+        // 1. Fetch videos for the authenticated user from the repository
+        List<Video> userVideos = videoRepository.findByOwnerUsername(username);
+
+        // 2. Map Video entities to VideoResponse DTOs
+        List<VideoResponse> responseDtos = userVideos.stream()
+                .map(video -> new VideoResponse(
+                        video.getId(),
+                        video.getGeneratedFilename(),
+                        video.getDescription(),
+                        video.getOwner().getUsername(),
+                        video.getFileSize()
+                ))
+                .collect(Collectors.toList());
+
+        log.info("Returning {} videos for user: {}", responseDtos.size(), username);
+
+        // 3. Return the list in the response body
+        return ResponseEntity.ok(responseDtos);
+    }
+
+    @GetMapping("/{id}/download")
+    public ResponseEntity<Resource> downloadVideo(@PathVariable Long id, Authentication authentication) {
+        String username = authentication.getName();
+        log.debug("Download request received for video ID: {} from user: {}", id, username);
+
+        // 1. Find Video by ID
+        Video video = videoRepository.findById(id)
+                .orElseThrow(() -> {
+                    log.warn("Download failed: Video not found for ID: {}", id);
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Video not found");
+                });
+
+        // 2. Check Permissions
+        if (!videoSecurityService.canView(id, username)) {
+            log.warn("Download forbidden for user: {} on video ID: {}", username, id);
+            // Return 403 Forbidden if user cannot view (more specific than 404)
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have permission to access this video");
+        }
+
+        // 3. Load Resource from Storage
+        Resource resource;
+        try {
+            log.debug("Loading resource from storage path: {}", video.getStoragePath());
+            resource = storageService.load(video.getStoragePath());
+        } catch (VideoStorageException e) {
+            log.error("Download failed: Could not load video file from storage path: {} for video ID: {}", video.getStoragePath(), id, e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error retrieving video file", e);
+        }
+
+        // Check if resource exists and is readable (basic check)
+        if (!resource.exists() || !resource.isReadable()) {
+            log.error("Download failed: Resource not found or not readable at path: {} for video ID: {}", video.getStoragePath(), id);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error retrieving video file [exists/readable check failed]");
+        }
+
+
+        // 4. Generate New UUID Filename for Download
+        // We don't want to expose the internal storage filename or the stored UUID.
+        String downloadFilename = UUID.randomUUID().toString() + ALLOWED_EXTENSION; // Reuse ALLOWED_EXTENSION
+        log.info("Generated download filename: {} for video ID: {}", downloadFilename, id);
+
+        // 5. Build Response
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(video.getMimeType())) // Use stored mime type
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + downloadFilename + "\"")
+                // Optional but recommended: Set Content-Length
+                // .contentLength(resource.contentLength()) // This requires handling IOException
+                .body(resource);
+    }
+
     /**
      * Checks if the provided MultipartFile starts with the expected MP4 magic bytes.
      * Reads only the necessary starting bytes.
@@ -231,5 +314,4 @@ public class VideoController {
         return sb.toString().trim();
     }
 
-    // === TODO: Add other endpoints (GET /api/videos, GET /api/videos/{id}, PUT, DELETE, POST /process) ===
 }
