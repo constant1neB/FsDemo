@@ -2,66 +2,67 @@ package com.example.fsdemo.service;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Objects;
 
 @Service
 public class FilesystemVideoStorageService implements VideoStorageService {
     private final Path rootLocation;
 
-    // Inject the storage path from application.properties
-    public FilesystemVideoStorageService(@Value("${video.storage.path}") String path) {
-        this.rootLocation = Paths.get(path);
+    public FilesystemVideoStorageService(@Value("${video.storage.path:./uploads/videos}") String path) { // Provide a default path
+        this.rootLocation = Paths.get(path).toAbsolutePath().normalize(); // Normalize path
         try {
-            // Create the directory if it doesn't exist
             Files.createDirectories(rootLocation);
         } catch (IOException e) {
-            throw new VideoStorageException("Could not initialize storage directory: " + path, e);
+            throw new VideoStorageException("Could not initialize storage directory: " + this.rootLocation, e);
         }
     }
 
     @Override
-    public String store(MultipartFile file, Long userId) throws VideoStorageException {
-        // Basic validation
+    public String store(MultipartFile file, Long userId, String generatedFilename) throws VideoStorageException {
+        // Basic validation (already done in controller mostly, but double check empty)
         if (file.isEmpty()) {
-            throw new VideoStorageException("Failed to store empty file.");
+            throw new VideoStorageException("Failed to store empty file (storage service check).");
+        }
+        // The filename is already generated and validated by the controller
+        if (generatedFilename == null || generatedFilename.isBlank() || generatedFilename.contains("/") || generatedFilename.contains("\\") || generatedFilename.contains("..")) {
+            throw new VideoStorageException("Invalid generated filename received by storage service: " + generatedFilename);
         }
 
-        String originalFilename = StringUtils.cleanPath(Objects.requireNonNull(file.getOriginalFilename()));
 
         try {
-            // Create a unique filename to avoid collisions and include user ID
-            String filename = userId + "_" + System.currentTimeMillis() + "_" + originalFilename;
-            Path destinationFile = this.rootLocation.resolve(
-                            Paths.get(filename))
+            Path destinationFile = this.rootLocation.resolve(generatedFilename)
                     .normalize().toAbsolutePath();
 
-            // Security check: Ensure the destination is within the root location
-            if (!destinationFile.getParent().equals(this.rootLocation.toAbsolutePath())) {
+            // Security check: Ensure the destination is *exactly* within the root location
+            // (normalize().toAbsolutePath() helps prevent some traversal issues)
+            if (!destinationFile.getParent().equals(this.rootLocation)) {
+                // This should theoretically not happen if generatedFilename is clean, but belt-and-suspenders
                 throw new VideoStorageException(
-                        "Cannot store file outside designated directory structure: " + originalFilename);
+                        "Security check failed: Cannot store file outside designated directory structure. Target: " + destinationFile);
             }
 
-            // Save the file
+            // Check if file already exists (UUID collision is extremely unlikely, but check anyway)
+            if (Files.exists(destinationFile)) {
+                throw new VideoStorageException("File already exists (UUID collision?): " + generatedFilename);
+            }
+
+            // Save the file using transferTo
             file.transferTo(destinationFile);
 
-            // Return the relative path or just the filename used for storage
-            return filename; // Or return destinationFile.toString(); if you need the full path
+            // Return the filename used for storage (which is the generated one)
+            return generatedFilename;
 
         } catch (IOException e) {
-            throw new VideoStorageException("Failed to store file " + originalFilename, e);
-        } catch (NullPointerException e) {
-            throw new VideoStorageException("File or filename was null", e);
+            throw new VideoStorageException("Failed to store file " + generatedFilename, e);
         }
     }
 
-    // Implement load and delete later when needed
-    // @Override public Resource load(String filename) { ... }
-    // @Override public void delete(String filename) { ... }
+    // Implement load and delete later
+    // @Override public Resource load(String storagePath) { ... }
+    // @Override public void delete(String storagePath) { ... }
 }
