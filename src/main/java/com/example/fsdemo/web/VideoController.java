@@ -222,6 +222,38 @@ public class VideoController {
         return ResponseEntity.ok(responseDtos);
     }
 
+    @GetMapping("/{id}")
+    public ResponseEntity<VideoResponse> getVideoDetails(@PathVariable Long id, Authentication authentication) {
+        String username = authentication.getName();
+        log.debug("Get video details request received for ID: {} from user: {}", id, username);
+
+        // 1. Find Video by ID
+        Video video = videoRepository.findById(id)
+                .orElseThrow(() -> {
+                    log.warn("Get details failed: Video not found for ID: {}", id);
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Video not found");
+                });
+
+        // 2. Check Permissions using VideoSecurityService
+        if (!videoSecurityService.canView(id, username)) {
+            log.warn("Get details forbidden for user: {} on video ID: {}", username, id);
+            // Return 403 Forbidden if user cannot view
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have permission to access this video's details");
+        }
+
+        // 3. Map to DTO
+        VideoResponse responseDto = new VideoResponse(
+                video.getId(),
+                video.getGeneratedFilename(),
+                video.getDescription(),
+                video.getOwner().getUsername(),
+                video.getFileSize()
+        );
+
+        log.info("Returning details for video ID: {}", id);
+        return ResponseEntity.ok(responseDto);
+    }
+
     @GetMapping("/{id}/download")
     public ResponseEntity<Resource> downloadVideo(@PathVariable Long id, Authentication authentication) {
         String username = authentication.getName();
