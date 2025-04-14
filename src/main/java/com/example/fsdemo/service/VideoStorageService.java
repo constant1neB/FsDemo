@@ -1,6 +1,6 @@
-// src/main/java/com/example/fsdemo/service/VideoStorageService.java
 package com.example.fsdemo.service;
 
+import org.springframework.core.io.Resource; // Import Resource
 import org.springframework.web.multipart.MultipartFile;
 
 public interface VideoStorageService {
@@ -15,7 +15,20 @@ public interface VideoStorageService {
      */
     String store(MultipartFile file, Long userId, String generatedFilename) throws VideoStorageException;
 
-    // Add load and delete later
-    // Resource load(String storagePath);
-    // void delete(String storagePath);
+    /**
+     * Loads a file as a Spring Resource.
+     *
+     * @param storagePath The path returned by the store method (e.g., the generated filename or a relative path).
+     * @return The Resource object representing the file.
+     * @throws VideoStorageException if the file cannot be found or read.
+     */
+    Resource load(String storagePath) throws VideoStorageException;
+
+    /**
+     * Deletes the file associated with the given storage path.
+     *
+     * @param storagePath The path returned by the store method.
+     * @throws VideoStorageException if deletion fails.
+     */
+    void delete(String storagePath) throws VideoStorageException;
 }

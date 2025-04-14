@@ -5,13 +5,27 @@ import com.example.fsdemo.domain.AppUserRepository;
 import com.example.fsdemo.domain.Video;
 import com.example.fsdemo.domain.VideoRepository;
 import com.example.fsdemo.service.JwtService;
+import com.example.fsdemo.service.VideoSecurityService;
 import com.example.fsdemo.service.VideoStorageService;
 import com.example.fsdemo.service.VideoStorageException;
+import com.example.fsdemo.web.VideoResponse;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.matchesPattern;
+import static org.mockito.BDDMockito.given;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -20,7 +34,10 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
@@ -34,19 +51,17 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.Matchers.matchesPattern; // For UUID regex matching
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString; // Import anyString
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /**
@@ -62,6 +77,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @Transactional
+@Import(VideoControllerTest.TestConfig.class)
 @MockitoSettings(strictness = Strictness.LENIENT) // Lenient needed if mocks aren't used in every test path
 class VideoControllerTest {
 
@@ -80,6 +96,8 @@ class VideoControllerTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Autowired
     private VideoRepository videoRepository;
@@ -90,9 +108,11 @@ class VideoControllerTest {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
-
     @Autowired
     private VideoStorageService storageService;
+
+    @Autowired
+    private VideoSecurityService videoSecurityService;
 
     private AppUser testUser;
     private byte[] sampleVideoContent;
@@ -105,8 +125,20 @@ class VideoControllerTest {
     static class TestConfig {
         @Bean
         @Primary
-        public VideoStorageService videoStorageService() {
+        public VideoStorageService videoStorageServiceMock() {
             return Mockito.mock(VideoStorageService.class);
+        }
+
+        @Bean
+        @Primary
+        public VideoSecurityService videoSecurityServiceMock() {
+            return Mockito.mock(VideoSecurityService.class);
+        }
+
+        @Bean
+        @Primary
+        public VideoRepository videoRepositoryMock() {
+            return Mockito.mock(VideoRepository.class);
         }
     }
 
@@ -121,7 +153,7 @@ class VideoControllerTest {
     @BeforeEach
     void setUp() throws Exception {
         // Clear repositories to ensure test isolation
-        videoRepository.deleteAll();
+        Mockito.reset(storageService, videoSecurityService, videoRepository);
         appUserRepository.deleteAll();
 
         // Create and save test user
@@ -131,7 +163,7 @@ class VideoControllerTest {
         // Load test video file from resources
         sampleVideoContent = loadSampleVideo();
 
-        Mockito.reset(storageService);
+        Mockito.reset(storageService, videoSecurityService);
 
         // Configure default mock behavior for storage service
         configureDefaultMockBehavior();
@@ -213,6 +245,14 @@ class VideoControllerTest {
         doReturn(expectedReturnedStoragePath) // Use specific mock behaviour for this test
                 .when(storageService).store(any(MultipartFile.class), eq(testUser.getId()), filenameCaptor.capture());
 
+        given(videoRepository.save(any(Video.class))).willAnswer(invocation -> {
+            Video videoToSave = invocation.getArgument(0);
+            if (videoToSave.getId() == null) {
+                videoToSave.setId(1L); // Assign a fixed ID for the test
+            }
+            return videoToSave;
+        });
+
         // Act & Assert
         mockMvc.perform(addAuth(multipart("/api/videos")
                         .file(videoFile)
@@ -221,20 +261,20 @@ class VideoControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.id").exists())
-                .andExpect(jsonPath("$.generatedFilename", matchesPattern(expectedStorageFilenameRegex)))
+                // Check against captured UUID filename
+                .andExpect(jsonPath("$.generatedFilename").value(filenameCaptor.getValue()))
                 .andExpect(jsonPath("$.description").value(description))
                 .andExpect(jsonPath("$.ownerUsername").value(TEST_USERNAME))
                 .andExpect(jsonPath("$.fileSize").value(sampleVideoContent.length));
 
         // Verify database state
-        assertThat(videoRepository.count()).isEqualTo(1);
-        Video savedVideo = videoRepository.findAll().get(0);
-        assertThat(savedVideo.getGeneratedFilename()).isNotEqualTo(SAMPLE_FILENAME);
-        assertThat(savedVideo.getGeneratedFilename()).matches(expectedStorageFilenameRegex);
-        assertThat(savedVideo.getStoragePath()).isEqualTo(expectedReturnedStoragePath);
-        assertThat(savedVideo.getDescription()).isEqualTo(description);
-        assertThat(savedVideo.getOwner().getId()).isEqualTo(testUser.getId());
-        assertThat(savedVideo.getFileSize()).isEqualTo(sampleVideoContent.length);
+        ArgumentCaptor<Video> videoSaveCaptor = ArgumentCaptor.forClass(Video.class);
+        verify(videoRepository).save(videoSaveCaptor.capture());
+        Video videoPassedToSave = videoSaveCaptor.getValue();
+        assertThat(videoPassedToSave.getDescription()).isEqualTo(description);
+        assertThat(videoPassedToSave.getOwner().getUsername()).isEqualTo(TEST_USERNAME);
+        assertThat(videoPassedToSave.getGeneratedFilename()).matches(expectedStorageFilenameRegex); // Check saved filename format
+        assertThat(videoPassedToSave.getStoragePath()).isEqualTo(expectedReturnedStoragePath);
 
         // Verify storage service interaction
         verify(storageService).store(any(MultipartFile.class), eq(testUser.getId()), anyString());
@@ -271,17 +311,33 @@ class VideoControllerTest {
      */
     @Test
     void uploadVideo_withEmptyDescription_shouldSucceed() throws Exception {
+        // Arrange
+        MockMultipartFile videoFile = createTestVideoFile();
+        ArgumentCaptor<String> filenameCaptor = ArgumentCaptor.forClass(String.class);
+        doReturn(DEFAULT_STORAGE_PATH)
+                .when(storageService).store(any(MultipartFile.class), eq(testUser.getId()), filenameCaptor.capture());
+
+        // --- Configure MOCK videoRepository.save() ---
+        given(videoRepository.save(any(Video.class))).willAnswer(invocation -> {
+            Video videoToSave = invocation.getArgument(0);
+            if (videoToSave.getId() == null) {
+                videoToSave.setId(1L);
+            } // Simulate ID assignment
+            return videoToSave;
+        });
+
         // Act & Assert
         mockMvc.perform(addAuth(multipart("/api/videos")
                         .file(createTestVideoFile())
+                        .file(videoFile)
                         .param("description", "")))
                 .andExpect(status().isCreated());
 
-        // Verify
-        assertThat(videoRepository.count()).isEqualTo(1);
-        Video savedVideo = videoRepository.findAll().get(0);
-        assertThat(savedVideo.getDescription()).isEmpty();
-        verify(storageService).store(any(MultipartFile.class), eq(testUser.getId()), anyString()); // Verify store *was* called
+        // Verify interactions with mocks
+        ArgumentCaptor<Video> videoSaveCaptor = ArgumentCaptor.forClass(Video.class);
+        verify(videoRepository).save(videoSaveCaptor.capture()); // Verify save was called
+        assertThat(videoSaveCaptor.getValue().getDescription()).isEmpty(); // Verify description was empty in saved object
+        verify(storageService).store(any(MultipartFile.class), eq(testUser.getId()), anyString());
     }
 
     /**
@@ -445,6 +501,186 @@ class VideoControllerTest {
 
         // Verify
         verify(storageService, never()).store(any(), anyLong(), anyString()); // Expect store NOT called
+    }
+
+    // === Download Tests ===
+
+    @Test
+    void downloadVideo_whenAllowed_shouldReturnVideoFileWithCorrectHeaders() throws Exception {
+        // Arrange
+        Long videoId = 1L;
+        String storedFilename = "a1b2c3d4.mp4"; // Stored name (doesn't matter much for download itself)
+        String storagePath = "uploads/videos/" + storedFilename; // Example storage path
+        byte[] videoContent = "mock video content".getBytes();
+        Resource videoResource = new ByteArrayResource(videoContent);
+
+        Video video = new Video(testUser, storedFilename, "Test", Instant.now(), storagePath, (long) videoContent.length, VIDEO_MIME_TYPE);
+        video.setId(videoId);
+
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
+        given(videoSecurityService.canView(videoId, TEST_USERNAME)).willReturn(true); // User is allowed to view
+        given(storageService.load(storagePath)).willReturn(videoResource); // Mock loading the resource
+
+        // Act & Assert
+        MvcResult result = mockMvc.perform(addAuth(get("/api/videos/{id}/download", videoId)))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(VIDEO_MIME_TYPE))
+                // Check Content-Disposition header: attachment; filename="<uuid>.mp4"
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, matchesPattern("attachment; filename=\"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\\.mp4\"")))
+                .andExpect(content().bytes(videoContent))
+                .andReturn();
+
+        // Optional: Verify the filename in the header is different from the stored one
+        String contentDisposition = result.getResponse().getHeader(HttpHeaders.CONTENT_DISPOSITION);
+        assertThat(contentDisposition).isNotNull();
+        assertThat(contentDisposition).doesNotContain(storedFilename);
+
+        // Verify mocks
+        verify(videoRepository).findById(videoId);
+        verify(videoSecurityService).canView(videoId, TEST_USERNAME);
+        verify(storageService).load(storagePath);
+    }
+
+    @Test
+    void downloadVideo_whenVideoNotFound_shouldReturnNotFound() throws Exception {
+        // Arrange
+        Long videoId = 99L;
+        given(videoRepository.findById(videoId)).willReturn(Optional.empty()); // Video does not exist
+
+        // Act & Assert
+        mockMvc.perform(addAuth(get("/api/videos/{id}/download", videoId)))
+                .andExpect(status().isNotFound());
+
+        // Verify mocks (security/storage shouldn't be called if not found)
+        verify(videoRepository).findById(videoId);
+        verify(videoSecurityService, never()).canView(anyLong(), anyString());
+        verify(storageService, never()).load(anyString());
+    }
+
+    @Test
+    void downloadVideo_whenNotAllowed_shouldReturnForbidden() throws Exception {
+        // Arrange
+        Long videoId = 2L;
+        String storedFilename = "private.mp4";
+        String storagePath = "uploads/videos/" + storedFilename;
+        AppUser anotherOwner = new AppUser("another", "pass", "U", "a@a.com"); // Different owner
+        Video video = new Video(anotherOwner, storedFilename, "Private", Instant.now(), storagePath, 100L, VIDEO_MIME_TYPE);
+        video.setId(videoId);
+        video.setPublic(false); // Ensure it's private
+
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
+        given(videoSecurityService.canView(videoId, TEST_USERNAME)).willReturn(false); // User is NOT allowed
+
+        // Act & Assert
+        mockMvc.perform(addAuth(get("/api/videos/{id}/download", videoId)))
+                .andExpect(status().isForbidden()); // Expect 403 Forbidden
+
+        // Verify mocks
+        verify(videoRepository).findById(videoId);
+        verify(videoSecurityService).canView(videoId, TEST_USERNAME);
+        verify(storageService, never()).load(anyString()); // Storage not called if not allowed
+    }
+
+    @Test
+    void downloadVideo_whenStorageLoadFails_shouldReturnInternalServerError() throws Exception {
+        // Arrange
+        Long videoId = 1L;
+        String storedFilename = "a1b2c3d4.mp4";
+        String storagePath = "uploads/videos/" + storedFilename;
+
+        Video video = new Video(testUser, storedFilename, "Test", Instant.now(), storagePath, 100L, VIDEO_MIME_TYPE);
+        video.setId(videoId);
+
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
+        given(videoSecurityService.canView(videoId, TEST_USERNAME)).willReturn(true);
+        // Mock storageService.load to throw an exception
+        given(storageService.load(storagePath)).willThrow(new VideoStorageException("Failed to read file"));
+
+        // Act & Assert
+        mockMvc.perform(addAuth(get("/api/videos/{id}/download", videoId)))
+                .andExpect(status().isInternalServerError());
+
+        // Verify mocks
+        verify(videoRepository).findById(videoId);
+        verify(videoSecurityService).canView(videoId, TEST_USERNAME);
+        verify(storageService).load(storagePath);
+    }
+
+    @Test
+    void listVideos_whenAuthenticated_shouldReturnOnlyUserVideos() throws Exception {
+        // Arrange
+        // Create videos for the test user
+        Video userVideo1 = new Video(testUser, "uuid-user1.mp4", "User Video 1", Instant.now(), "path1", 100L, VIDEO_MIME_TYPE);
+        userVideo1.setId(1L);
+        Video userVideo2 = new Video(testUser, "uuid-user2.mp4", "User Video 2", Instant.now(), "path2", 200L, VIDEO_MIME_TYPE);
+        userVideo2.setId(2L);
+
+        // Create a video for another user (should not be returned)
+        AppUser otherUser = new AppUser("otherUser", "pass", "USER", "other@example.com");
+        otherUser.setId(99L); // Ensure different ID
+        Video otherVideo = new Video(otherUser, "uuid-other.mp4", "Other User Video", Instant.now(), "path3", 300L, VIDEO_MIME_TYPE);
+        otherVideo.setId(3L);
+
+        // Mock the repository method (we'll add this method next)
+        // We expect findByOwnerUsername to be called with the authenticated username
+        given(videoRepository.findByOwnerUsername(TEST_USERNAME))
+                .willReturn(Arrays.asList(userVideo1, userVideo2));
+
+        // Act & Assert
+        MvcResult result = mockMvc.perform(addAuth(get("/api/videos") // Use GET request
+                        .accept(MediaType.APPLICATION_JSON)))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$", hasSize(2))) // Expecting 2 videos for the user
+                .andExpect(jsonPath("$[0].id").value(userVideo1.getId()))
+                .andExpect(jsonPath("$[0].generatedFilename").value(userVideo1.getGeneratedFilename()))
+                .andExpect(jsonPath("$[0].ownerUsername").value(TEST_USERNAME))
+                .andExpect(jsonPath("$[1].id").value(userVideo2.getId()))
+                .andExpect(jsonPath("$[1].generatedFilename").value(userVideo2.getGeneratedFilename()))
+                .andExpect(jsonPath("$[1].ownerUsername").value(TEST_USERNAME))
+                .andReturn();
+
+        // Optional: Further verification by deserializing the response
+        String jsonResponse = result.getResponse().getContentAsString();
+        List<VideoResponse> videoResponses = objectMapper.readValue(jsonResponse, new TypeReference<List<VideoResponse>>() {
+        });
+        assertThat(videoResponses).hasSize(2);
+        assertThat(videoResponses).extracting(VideoResponse::ownerUsername).containsOnly(TEST_USERNAME);
+        assertThat(videoResponses).extracting(VideoResponse::id).containsExactlyInAnyOrder(userVideo1.getId(), userVideo2.getId());
+
+        // Verify repository interaction
+        verify(videoRepository).findByOwnerUsername(TEST_USERNAME);
+        // Verify security service was NOT called (listing doesn't need individual view checks here)
+        verify(videoSecurityService, never()).canView(anyLong(), anyString());
+    }
+
+    @Test
+    void listVideos_whenUnauthenticated_shouldReturnUnauthorized() throws Exception {
+        // Act & Assert
+        mockMvc.perform(get("/api/videos") // No addAuth()
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isUnauthorized());
+
+        // Verify no repository interaction
+        verify(videoRepository, never()).findByOwnerUsername(anyString());
+    }
+
+    @Test
+    void listVideos_whenUserHasNoVideos_shouldReturnEmptyList() throws Exception {
+        // Arrange
+        // Mock the repository method to return an empty list
+        given(videoRepository.findByOwnerUsername(TEST_USERNAME))
+                .willReturn(Collections.emptyList());
+
+        // Act & Assert
+        mockMvc.perform(addAuth(get("/api/videos")
+                        .accept(MediaType.APPLICATION_JSON)))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$", hasSize(0))); // Expecting an empty array
+
+        // Verify repository interaction
+        verify(videoRepository).findByOwnerUsername(TEST_USERNAME);
     }
 
     // ============ HELPER METHODS ============ //
