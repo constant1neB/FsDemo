@@ -10,7 +10,8 @@ import java.time.Instant;
         indexes = {
                 @Index(name = "idx_video_owner", columnList = "user_id"),
                 // Index on storagePath might still be useful, even if it's opaque
-                @Index(name = "idx_video_storage_path", columnList = "storagePath", unique = true)
+                @Index(name = "idx_video_storage_path", columnList = "storagePath", unique = true),
+                @Index(name = "idx_video_processed_path", columnList = "processedStoragePath", unique = true)
                 // Add index on the generated filename if we query by it often (probably not needed initially)
                 // @Index(name = "idx_video_generated_filename", columnList = "generatedFilename")
         })
@@ -39,6 +40,10 @@ public class Video {
     // Path where the file is actually stored (can be just the generatedFilename or a longer path)
     @Column(nullable = false, unique = true, length = 512) // Increased length for flexibility
     private String storagePath;
+
+    // Path where the LATEST PROCESSED file is stored (nullable if not processed yet or failed)
+    @Column(unique = true, length = 512, nullable = true) // Nullable, unique path for processed file
+    private String processedStoragePath;
 
     @Column(nullable = false)
     private boolean isPublic = false; // Default to private
@@ -126,6 +131,14 @@ public class Video {
 
     public void setStoragePath(String storagePath) {
         this.storagePath = storagePath;
+    }
+
+    public String getProcessedStoragePath() {
+        return processedStoragePath;
+    }
+
+    public void setProcessedStoragePath(String processedStoragePath) {
+        this.processedStoragePath = processedStoragePath;
     }
 
     public boolean isPublic() {

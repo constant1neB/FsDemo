@@ -4,6 +4,7 @@ import com.example.fsdemo.domain.AppUser;
 import com.example.fsdemo.domain.AppUserRepository;
 import com.example.fsdemo.domain.Video;
 import com.example.fsdemo.domain.VideoRepository;
+import com.example.fsdemo.service.VideoProcessingService;
 import com.example.fsdemo.service.VideoSecurityService;
 import com.example.fsdemo.service.VideoStorageException;
 import com.example.fsdemo.service.VideoStorageService;
@@ -27,6 +28,7 @@ import java.io.IOException; // For magic bytes check
 import java.io.InputStream;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.UUID;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -41,11 +43,14 @@ public class VideoController {
     private final VideoRepository videoRepository;
     private final AppUserRepository appUserRepository;
     private final VideoSecurityService videoSecurityService;
+    private final VideoProcessingService videoProcessingService;
 
     // Inject max file size from properties
     @Value("${video.upload.max-size-mb:40}") // Default 40MB
     private long maxFileSizeMb;
 
+    private static final EnumSet<Video.VideoStatus> ALLOWED_START_PROCESSING_STATUSES =
+            EnumSet.of(Video.VideoStatus.UPLOADED, Video.VideoStatus.READY);
     // Define allowed file properties
     private static final String ALLOWED_EXTENSION = ".mp4";
     private static final String ALLOWED_CONTENT_TYPE = "video/mp4"; // Be specific now
@@ -60,11 +65,13 @@ public class VideoController {
     public VideoController(VideoStorageService storageService,
                            VideoRepository videoRepository,
                            AppUserRepository appUserRepository,
-                           VideoSecurityService videoSecurityService) {
+                           VideoSecurityService videoSecurityService,
+                           VideoProcessingService videoProcessingService) {
         this.storageService = storageService;
         this.videoRepository = videoRepository;
         this.appUserRepository = appUserRepository;
         this.videoSecurityService = videoSecurityService;
+        this.videoProcessingService = videoProcessingService;
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -139,7 +146,6 @@ public class VideoController {
         // 3. Generate Secure Filename (UUID) - AFTER validation passes
         String generatedFilename = UUID.randomUUID().toString() + ALLOWED_EXTENSION;
         log.info("Validation passed. Generated secure filename {} for original file '{}' uploaded by user {}", generatedFilename, sanitizedOriginalFilename, username);
-
 
         String storagePath;
         try {
@@ -253,6 +259,56 @@ public class VideoController {
 
         log.info("Returning details for video ID: {}", id);
         return ResponseEntity.ok(responseDto);
+    }
+
+    @PostMapping(value = "/{id}/process", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Transactional // Ensure status update is atomic with checks
+    public ResponseEntity<Void> processVideo(
+            @PathVariable Long id,
+            @RequestBody @Valid EditOptions options, // Receive JSON body with options
+            Authentication authentication) {
+
+        String username = authentication.getName();
+        log.info("Processing request received for video ID: {} from user: {}", id, username);
+
+        // 1. Find Video by ID
+        Video video = videoRepository.findById(id)
+                .orElseThrow(() -> {
+                    log.warn("Processing failed: Video not found for ID: {}", id);
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Video not found");
+                });
+
+        // 2. Check Ownership
+        if (!videoSecurityService.isOwner(id, username)) {
+            log.warn("Processing forbidden for user: {} on video ID: {}", username, id);
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have permission to process this video");
+        }
+
+        // 3. Check Current Status
+        if (!ALLOWED_START_PROCESSING_STATUSES.contains(video.getStatus())) {
+            log.warn("Processing conflict for user: {} on video ID: {}. Current status is '{}', requires UPLOADED or READY.",
+                    username, id, video.getStatus());
+            // Use 409 Conflict if already processing or failed
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Video cannot be processed in its current state: " + video.getStatus());
+        }
+        // NOTE: @Valid on EditOptions handles input validation based on annotations in EditOptions record
+
+        // 4. Update Status and Clear Previous Processed Path
+        log.debug("Updating status to PROCESSING for video ID: {}", id);
+        video.setStatus(Video.VideoStatus.PROCESSING);
+        video.setProcessedStoragePath(null); // Clear any old processed path before starting new process
+
+        // 5. Save Status Update
+        videoRepository.save(video);
+        log.debug("Status updated and saved for video ID: {}", id);
+
+        // 6. Trigger Asynchronous Processing
+        log.info("Calling async processing service for video ID: {}", id);
+        videoProcessingService.processVideoEdits(id, options, username);
+
+        // 7. Return Accepted (202) immediately
+        log.info("Returning 202 Accepted for processing request of video ID: {}", id);
+        return ResponseEntity.accepted().build();
     }
 
     @GetMapping("/{id}/download")
