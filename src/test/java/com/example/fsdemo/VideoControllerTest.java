@@ -8,6 +8,7 @@ import com.example.fsdemo.service.JwtService;
 import com.example.fsdemo.service.VideoSecurityService;
 import com.example.fsdemo.service.VideoStorageService;
 import com.example.fsdemo.service.VideoStorageException;
+import com.example.fsdemo.web.UpdateVideoRequest;
 import com.example.fsdemo.web.VideoResponse;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,8 +22,10 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-import static org.hamcrest.Matchers.hasSize;
-import static org.hamcrest.Matchers.matchesPattern;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import static org.hamcrest.Matchers.*;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -744,6 +747,35 @@ class VideoControllerTest {
         // Verify mocks
         verify(videoRepository).findById(videoId);
         verify(videoSecurityService).canView(videoId, TEST_USERNAME);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "Invalid <script>alert('XSS')</script> tags",
+            "Contains symbols like $#@%^&*",
+            "Line breaks\n are not allowed",
+            "Tabs\t are not allowed",
+            "Starts with invalid > character",
+            "Ends with invalid < character"
+    })
+    void updateVideoDescription_withInvalidCharacters_shouldReturnBadRequest(String invalidDescription) throws Exception {
+        // Arrange
+        Long videoId = 1L;
+        Video originalVideo = new Video(testUser, "invalid-desc.mp4", "Old", Instant.now(), "path/invalid", 100L, VIDEO_MIME_TYPE);
+        originalVideo.setId(videoId);
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(originalVideo));
+        given(videoSecurityService.isOwner(videoId, TEST_USERNAME)).willReturn(true);
+
+        UpdateVideoRequest updateRequest = new UpdateVideoRequest(invalidDescription);
+
+        // Act & Assert
+        mockMvc.perform(addAuth(put("/api/videos/{id}", videoId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updateRequest))))
+                .andExpect(status().isBadRequest());
+
+        // Verify that save was NOT called because validation failed
+        verify(videoRepository, never()).save(any(Video.class));
     }
 
     @Test

@@ -7,9 +7,10 @@ import com.example.fsdemo.domain.VideoRepository;
 import com.example.fsdemo.service.VideoSecurityService;
 import com.example.fsdemo.service.VideoStorageException;
 import com.example.fsdemo.service.VideoStorageService;
+import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value; // For file size limit
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -302,6 +303,50 @@ public class VideoController {
                 // Optional but recommended: Set Content-Length
                 // .contentLength(resource.contentLength()) // This requires handling IOException
                 .body(resource);
+    }
+    @PutMapping("/{id}")
+    @Transactional // Ensure DB operation is atomic
+    public ResponseEntity<VideoResponse> updateVideoDescription(
+            @PathVariable Long id,
+            @RequestBody @Valid UpdateVideoRequest request,
+            Authentication authentication) {
+
+        String username = authentication.getName();
+        log.debug("Update video description request received for ID: {} from user: {}", id, username);
+
+        // 1. Find Video by ID
+        Video video = videoRepository.findById(id)
+                .orElseThrow(() -> {
+                    log.warn("Update failed: Video not found for ID: {}", id);
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Video not found");
+                });
+
+        // 2. Check Permissions (Ownership required for update)
+        if (!videoSecurityService.isOwner(id, username)) {
+            log.warn("Update forbidden for user: {} on video ID: {}", username, id);
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have permission to update this video");
+        }
+
+        // 3. Update Description
+        // Handle null description in request gracefully (e.g., set to empty string or keep existing)
+        String newDescription = request.description() != null ? request.description() : "";
+        video.setDescription(newDescription);
+        log.trace("Updating description for video ID: {} to '{}'", id, newDescription);
+
+        // 4. Save Updated Video (within transaction)
+        Video savedVideo = videoRepository.save(video);
+        log.info("Successfully updated description for video ID: {}", savedVideo.getId());
+
+        // 5. Map to DTO and Return
+        VideoResponse responseDto = new VideoResponse(
+                savedVideo.getId(),
+                savedVideo.getGeneratedFilename(),
+                savedVideo.getDescription(),
+                savedVideo.getOwner().getUsername(),
+                savedVideo.getFileSize()
+        );
+
+        return ResponseEntity.ok(responseDto);
     }
 
     @DeleteMapping("/{id}")
