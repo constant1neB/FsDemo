@@ -20,8 +20,9 @@ public class AppUserValidationTest {
 
     @BeforeAll
     static void setUpValidator() {
-        ValidatorFactory factory = Validation.buildDefaultValidatorFactory();
-        validator = factory.getValidator();
+        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+            validator = factory.getValidator();
+        }
     }
 
     @Test
@@ -42,7 +43,8 @@ public class AppUserValidationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"", "   "}) // Blank strings
+    @ValueSource(strings = {"", "   "})
+        // Blank strings
     void whenUsernameIsBlank_thenViolation(String blankUsername) {
         AppUser user = new AppUser(blankUsername, "ValidPass123", "USER", "test@example.com");
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
@@ -52,7 +54,8 @@ public class AppUserValidationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"us", "aVeryLongUsernameThatExceedsTheLimit"}) // Size constraints (assuming 3-20)
+    @ValueSource(strings = {"us", "aVeryLongUsernameThatExceedsTheLimit"})
+        // Size constraints (assuming 3-20)
     void whenUsernameSizeIsInvalid_thenViolation(String invalidSizeUsername) {
         AppUser user = new AppUser(invalidSizeUsername, "ValidPass123", "USER", "test@example.com");
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
