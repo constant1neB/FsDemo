@@ -2,8 +2,8 @@ package com.example.fsdemo;
 
 import com.example.fsdemo.domain.AppUser;
 import com.example.fsdemo.domain.Video;
-import com.example.fsdemo.domain.VideoRepository;
-import com.example.fsdemo.service.VideoSecurityService;
+import com.example.fsdemo.repository.VideoRepository;
+import com.example.fsdemo.service.impl.VideoSecurityServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,7 +25,7 @@ class VideoSecurityServiceTest {
     private VideoRepository videoRepository;
 
     @InjectMocks
-    private VideoSecurityService videoSecurityService;
+    private VideoSecurityServiceImpl videoSecurityService;
 
     private AppUser ownerUser;
     private AppUser otherUser;

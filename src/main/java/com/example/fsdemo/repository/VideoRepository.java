@@ -1,5 +1,6 @@
-package com.example.fsdemo.domain;
+package com.example.fsdemo.repository;
 
+import com.example.fsdemo.domain.Video;
 import org.springframework.data.repository.CrudRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;

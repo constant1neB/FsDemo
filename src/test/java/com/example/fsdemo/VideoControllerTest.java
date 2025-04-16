@@ -1,13 +1,16 @@
 package com.example.fsdemo;
 
 import com.example.fsdemo.domain.AppUser;
-import com.example.fsdemo.domain.AppUserRepository;
+import com.example.fsdemo.exceptions.VideoStorageException;
+import com.example.fsdemo.repository.AppUserRepository;
 import com.example.fsdemo.domain.Video;
-import com.example.fsdemo.domain.VideoRepository;
+import com.example.fsdemo.repository.VideoRepository;
+import com.example.fsdemo.security.JwtService;
 import com.example.fsdemo.service.*;
-import com.example.fsdemo.web.EditOptions;
-import com.example.fsdemo.web.UpdateVideoRequest;
-import com.example.fsdemo.web.VideoResponse;
+import com.example.fsdemo.service.VideoSecurityService;
+import com.example.fsdemo.web.dto.EditOptions;
+import com.example.fsdemo.web.dto.UpdateVideoRequest;
+import com.example.fsdemo.web.dto.VideoResponse;
 import com.example.fsdemo.domain.Video.VideoStatus;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -90,7 +93,7 @@ class VideoControllerTest {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
-    // --- Use @MockitoBean for mocks required by the controller ---
+    // @MockitoBean for mocks required by the controller
     @MockitoBean
     private VideoRepository videoRepository;
     @MockitoBean

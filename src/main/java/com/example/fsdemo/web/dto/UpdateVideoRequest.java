@@ -1,4 +1,4 @@
-package com.example.fsdemo.web;
+package com.example.fsdemo.web.dto;
 
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;

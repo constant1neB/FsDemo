@@ -1,6 +1,5 @@
-package com.example.fsdemo;
+package com.example.fsdemo.security;
 
-import com.example.fsdemo.service.JwtService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;

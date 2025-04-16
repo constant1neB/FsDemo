@@ -1,6 +1,5 @@
-package com.example.fsdemo;
+package com.example.fsdemo.security;
 
-import com.example.fsdemo.service.UserDetailsServiceImpl;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

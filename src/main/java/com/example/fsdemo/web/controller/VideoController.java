@@ -1,13 +1,16 @@
-package com.example.fsdemo.web;
+package com.example.fsdemo.web.controller;
 
 import com.example.fsdemo.domain.AppUser;
-import com.example.fsdemo.domain.AppUserRepository;
+import com.example.fsdemo.repository.AppUserRepository;
 import com.example.fsdemo.domain.Video;
-import com.example.fsdemo.domain.VideoRepository;
+import com.example.fsdemo.repository.VideoRepository;
 import com.example.fsdemo.service.VideoProcessingService;
-import com.example.fsdemo.service.VideoSecurityService;
-import com.example.fsdemo.service.VideoStorageException;
+import com.example.fsdemo.exceptions.VideoStorageException;
 import com.example.fsdemo.service.VideoStorageService;
+import com.example.fsdemo.service.VideoSecurityService;
+import com.example.fsdemo.web.dto.EditOptions;
+import com.example.fsdemo.web.dto.UpdateVideoRequest;
+import com.example.fsdemo.web.dto.VideoResponse;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
