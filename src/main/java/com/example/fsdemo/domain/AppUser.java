@@ -1,6 +1,5 @@
 package com.example.fsdemo.domain;
 
-
 import jakarta.persistence.*;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -22,6 +21,7 @@ public class AppUser {
     private String username;
 
     @NotBlank(message = "Password cannot be blank")
+    @Size(min = 12, max = 70, message = "Password size must be between 12 and 70 characters")
     @Column(nullable = false)
     private String password;
 
@@ -34,9 +34,8 @@ public class AppUser {
     @Column(unique = true)
     private String email;
 
-    // consider introducing phone no. field for 2FA
-
-    public AppUser() {}
+    public AppUser() {
+    }
 
     public AppUser(String username, String password, String role, String email) {
         super();

@@ -1,5 +1,7 @@
-package com.example.fsdemo.service;
+package com.example.fsdemo.service.impl;
 
+import com.example.fsdemo.exceptions.VideoStorageException;
+import com.example.fsdemo.service.VideoStorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;

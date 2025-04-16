@@ -1,8 +1,8 @@
-package com.example.fsdemo.service;
+package com.example.fsdemo.security;
 
 
 import com.example.fsdemo.domain.AppUser;
-import com.example.fsdemo.domain.AppUserRepository;
+import com.example.fsdemo.repository.AppUserRepository;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.User.UserBuilder;
 import org.springframework.security.core.userdetails.UserDetails;

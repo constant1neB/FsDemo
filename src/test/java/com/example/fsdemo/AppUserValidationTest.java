@@ -79,9 +79,56 @@ public class AppUserValidationTest {
     void whenPasswordIsBlank_thenViolation(String blankPassword) {
         AppUser user = new AppUser("validuser", blankPassword, "USER", "test@example.com");
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
+
+        assertThat(violations).hasSize(2);
+        assertThat(violations).anyMatch(v ->
+                v.getPropertyPath().toString().equals("password") &&
+                        v.getMessage().contains("Password cannot be blank") // Use the exact message
+        );
+        assertThat(violations).anyMatch(v ->
+                v.getPropertyPath().toString().equals("password") &&
+                        v.getMessage().contains("Password size must be between 12 and 70 characters") // Use the exact message
+        );
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"12345678901", "shortpwd"})
+        // Passwords less than 12 characters
+    void whenPasswordIsTooShort_thenViolation(String shortPassword) {
+        AppUser user = new AppUser("validuser", shortPassword, "USER", "test@example.com");
+        Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
+        assertThat(violations).hasSize(1);
+        assertThat(violations).anyMatch(v ->
+                v.getPropertyPath().toString().equals("password") &&
+                        v.getMessage().contains("size must be between 12 and 70 characters")
+        );
+    }
+
+    @Test
+    void whenPasswordIsTooLong_thenViolation() {
+        String longPassword = "a".repeat(71); // Password exactly 71 characters (too long)
+        AppUser user = new AppUser("validuser", longPassword, "USER", "test@example.com");
+        Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
         assertThat(violations).hasSize(1);
         assertThat(violations.iterator().next().getPropertyPath().toString()).isEqualTo("password");
-        assertThat(violations.iterator().next().getMessage()).contains("blank");
+        // Check for the message defined in the @Size annotation
+        assertThat(violations.iterator().next().getMessage()).contains("size must be between 12 and 70 characters");
+    }
+
+    @Test
+    void whenPasswordIsMinLength_thenNoViolation() {
+        String minLengthPassword = "a".repeat(12); // Password exactly 12 characters
+        AppUser user = new AppUser("validuser", minLengthPassword, "USER", "test@example.com");
+        Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
+        assertThat(violations).isEmpty(); // Should be valid
+    }
+
+    @Test
+    void whenPasswordIsMaxLength_thenNoViolation() {
+        String maxLengthPassword = "a".repeat(70); // Password exactly 70 characters
+        AppUser user = new AppUser("validuser", maxLengthPassword, "USER", "test@example.com");
+        Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
+        assertThat(violations).isEmpty(); // Should be valid
     }
 
     // --- Role Tests ---

@@ -1,4 +1,4 @@
-package com.example.fsdemo.service;
+package com.example.fsdemo.exceptions;
 
 public class VideoStorageException extends RuntimeException {
     public VideoStorageException(String message) {

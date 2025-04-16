@@ -1,4 +1,4 @@
-package com.example.fsdemo.service;
+package com.example.fsdemo.security;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jws;

@@ -1,4 +1,4 @@
-package com.example.fsdemo.web;
+package com.example.fsdemo.web.dto;
 
 /**
  * Data Transfer Object (DTO) representing the response for video operations.

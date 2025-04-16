@@ -1,24 +1,6 @@
 package com.example.fsdemo.service;
 
-import com.example.fsdemo.domain.Video;
-import com.example.fsdemo.domain.VideoRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.util.Optional;
-
-@Service
-@Transactional(readOnly = true)
-public class VideoSecurityService {
-
-    private static final Logger log = LoggerFactory.getLogger(VideoSecurityService.class);
-    private final VideoRepository videoRepository;
-
-    public VideoSecurityService(VideoRepository videoRepository) {
-        this.videoRepository = videoRepository;
-    }
+public interface VideoSecurityService {
 
     /**
      * Checks if the given username is the owner of the video.
@@ -27,16 +9,7 @@ public class VideoSecurityService {
      * @param username The username to check.
      * @return true if the user is the owner, false otherwise.
      */
-    public boolean isOwner(Long videoId, String username) {
-        if (username == null || videoId == null) {
-            return false;
-        }
-        Optional<Video> videoOpt = videoRepository.findById(videoId);
-        boolean owner = videoOpt.map(video -> video.getOwner().getUsername().equals(username))
-                .orElse(false);
-        log.trace("isOwner check for videoId: {}, username: {}. Result: {}", videoId, username, owner);
-        return owner;
-    }
+    boolean isOwner(Long videoId, String username);
 
     /**
      * Checks if the given user can view the video (must be the owner).
@@ -45,12 +18,7 @@ public class VideoSecurityService {
      * @param username The username attempting to view.
      * @return true if viewing is allowed (user is owner), false otherwise.
      */
-    public boolean canView(Long videoId, String username) {
-        boolean allowed = isOwner(videoId, username);
-        log.trace("canView check (private only) for videoId: {}, username: {}. Result: {}",
-                videoId, username, allowed);
-        return allowed;
-    }
+    boolean canView(Long videoId, String username);
 
     /**
      * Checks if the given user can delete the video (must be the owner).
@@ -59,9 +27,5 @@ public class VideoSecurityService {
      * @param username The username attempting to delete.
      * @return true if deletion is allowed, false otherwise.
      */
-    public boolean canDelete(Long videoId, String username) {
-        boolean allowed = isOwner(videoId, username);
-        log.trace("canDelete check for videoId: {}, username: {}. Result: {}", videoId, username, allowed);
-        return allowed;
-    }
+    boolean canDelete(Long videoId, String username);
 }

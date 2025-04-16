@@ -1,9 +1,12 @@
-package com.example.fsdemo.service;
+package com.example.fsdemo.service.impl;
 
 import com.example.fsdemo.domain.Video;
 import com.example.fsdemo.domain.Video.VideoStatus;
-import com.example.fsdemo.domain.VideoRepository;
-import com.example.fsdemo.web.EditOptions;
+import com.example.fsdemo.exceptions.VideoStorageException;
+import com.example.fsdemo.repository.VideoRepository;
+import com.example.fsdemo.service.VideoProcessingService;
+import com.example.fsdemo.service.VideoStorageService;
+import com.example.fsdemo.web.dto.EditOptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -154,21 +157,9 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             log.debug("[Async] Temporary file cleanup attempted for video ID: {}", videoId);
         }
     }
-
-    /**
-     * Executes the FFmpeg process using ProcessBuilder.
-     * Handles stream reading and timeout.
-     * Throws RuntimeException on failure or timeout.
-     *
-     * @param command The command list to execute.
-     * @param videoId The ID of the video being processed (for logging).
-     * @throws IOException        If ProcessBuilder fails to start.
-     * @throws InterruptedException If waiting for the process is interrupted.
-     * @throws RuntimeException     If FFmpeg returns non-zero exit code.
-     * @throws TimeoutException     If FFmpeg process exceeds timeout.
-     */
-    protected void executeFfmpegProcess(List<String> command, Long videoId)
-            throws IOException, InterruptedException, RuntimeException, TimeoutException { // Added TimeoutException
+    
+    public void executeFfmpegProcess(List<String> command, Long videoId)
+            throws IOException, InterruptedException, RuntimeException, TimeoutException {
 
         Process ffmpegProcess = null;
         ExecutorService streamReaderExecutor = Executors.newFixedThreadPool(2);
