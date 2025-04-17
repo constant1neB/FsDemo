@@ -1,6 +1,7 @@
 package com.example.fsdemo.web.controller;
 
 import com.example.fsdemo.domain.AppUser;
+import com.example.fsdemo.exceptions.VideoStorageException;
 import com.example.fsdemo.repository.AppUserRepository;
 import com.example.fsdemo.domain.Video;
 import com.example.fsdemo.repository.VideoRepository;
@@ -424,15 +425,25 @@ public class VideoController {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Video metadata is inconsistent (missing storage path)");
         }
 
-        // Let VideoStorageException or other RuntimeExceptions propagate
         log.trace("Attempting to delete video file from storage: {}", storagePath);
-        log.info("Successfully deleted video file from storage: {}", storagePath);
-
+        try {
+            storageService.delete(storagePath); // Actually call the delete method
+            log.info("Successfully deleted video file from storage: {}", storagePath); // Log success *after* the call
+        } catch (VideoStorageException e) {
+            // Log the storage exception specifically
+            log.error("Failed to delete video file from storage: {} for video ID: {}. Error: {}", storagePath, id, e.getMessage(), e);
+            // Re-throw it to trigger rollback and let the GlobalExceptionHandler handle it
+            throw e;
+        } catch (Exception e) {
+            // Catch other potential runtime errors during deletion
+            log.error("Unexpected error deleting video file from storage: {} for video ID: {}. Error: {}", storagePath, id, e.getMessage(), e);
+            // Wrap in a specific or generic exception to trigger rollback/error response
+            throw new VideoStorageException("Unexpected error during file deletion for video " + id, e);
+        }
 
         // 4. Delete from Database (only if storage deletion succeeded)
         videoRepository.delete(video);
         log.info("Successfully deleted video metadata from database for ID: {}", id);
-
 
         // 5. Return No Content
         return ResponseEntity.noContent().build(); // Standard for successful DELETE
