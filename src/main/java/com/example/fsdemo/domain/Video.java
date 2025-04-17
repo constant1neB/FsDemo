@@ -2,6 +2,7 @@ package com.example.fsdemo.domain;
 
 import jakarta.persistence.*;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
 
@@ -29,9 +30,10 @@ public class Video {
     @Column(nullable = false, length = 50) // UUID (36 chars) + .mp4 (4 chars) = 40. 50 gives buffer.
     private String generatedFilename;
 
-    @Pattern(regexp = "^[a-zA-Z0-9.,!?'\"\\-_;:() ]*$",
-            message = "Description contains invalid characters. Only letters, numbers, spaces, and basic punctuation (. , ! ? ' \" - _ ; : ( )) are allowed.")
-    @Column(length = 1024) // Allow longer descriptions
+    @Pattern(regexp = "^[\\p{L}0-9.,!?'\"_;:() \\r\\n-]*$",
+            message = "Description contains invalid characters. Only letters, numbers, whitespace (including newlines), and basic punctuation (. , ! ? ' \" - _ ; : ( )) are allowed.")
+    @Size(max = 255, message = "Description cannot exceed 255 characters")
+    @Column(length = 255)
     private String description;
 
     @Column(nullable = false)
