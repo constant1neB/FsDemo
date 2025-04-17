@@ -545,30 +545,113 @@ class VideoControllerTest {
     @ValueSource(strings = {
             "Invalid <script>alert('XSS')</script> tags",
             "Contains symbols like $#@%^&*",
-            "Line breaks\n are not allowed",
-            "Tabs\t are not allowed",
             "Starts with invalid > character",
-            "Ends with invalid < character"
+            "Ends with invalid < character",
+            "Contains a backslash \\ character"
     })
     void updateVideoDescription_withInvalidCharacters_shouldReturnBadRequest(String invalidDescription) throws Exception {
         Long videoId = 1L;
         Video originalVideo = new Video(testUser, "invalid-desc.mp4", "Old", Instant.now(), "path/invalid", 100L, VIDEO_MIME_TYPE);
         originalVideo.setId(videoId);
-        // Mock find but not save, as validation should fail first
+
         given(videoRepository.findById(videoId)).willReturn(Optional.of(originalVideo));
         given(videoSecurityService.isOwner(videoId, TEST_USERNAME)).willReturn(true);
 
         UpdateVideoRequest updateRequest = new UpdateVideoRequest(invalidDescription);
 
-        mockMvc.perform(addAuth(put("/api/videos/{id}", videoId)
+        mockMvc.perform(addAuth(put("/api/videos/{id}", videoId))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(updateRequest))))
+                        .content(objectMapper.writeValueAsString(updateRequest)))
                 .andExpect(status().isBadRequest());
 
         verify(videoRepository, never()).save(any(Video.class));
     }
 
-    // Add test for successful description update if needed
+    @Test
+    void updateVideoDescription_withNewlineCharacter_shouldSucceed() throws Exception {
+        Long videoId = 5L;
+        String descriptionWithNewline = "This is line one.\nThis is line two.";
+        assertThat(descriptionWithNewline.length()).isLessThanOrEqualTo(255);
+
+        Video originalVideo = new Video(testUser, "newline-desc.mp4", "Old Desc", Instant.now(), "path/newline", 150L, VIDEO_MIME_TYPE);
+        originalVideo.setId(videoId);
+
+        UpdateVideoRequest updateRequest = new UpdateVideoRequest(descriptionWithNewline);
+
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(originalVideo));
+        given(videoSecurityService.isOwner(videoId, TEST_USERNAME)).willReturn(true);
+        given(videoRepository.save(any(Video.class))).willAnswer(invocation -> invocation.getArgument(0));
+
+        mockMvc.perform(addAuth(put("/api/videos/{id}", videoId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(videoId))
+                .andExpect(jsonPath("$.description").value(descriptionWithNewline));
+
+        ArgumentCaptor<Video> videoCaptor = ArgumentCaptor.forClass(Video.class);
+        verify(videoRepository).save(videoCaptor.capture());
+        assertThat(videoCaptor.getValue().getDescription()).isEqualTo(descriptionWithNewline);
+    }
+
+    @Test
+    void updateVideoDescription_exceedingMaxLength_shouldReturnBadRequest() throws Exception {
+        Long videoId = 6L;
+        String longDescription = "a".repeat(256); // Exactly one character over the limit
+
+        Video originalVideo = new Video(testUser, "long-desc.mp4", "Old", Instant.now(), "path/long", 100L, VIDEO_MIME_TYPE);
+        originalVideo.setId(videoId);
+
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(originalVideo));
+        given(videoSecurityService.isOwner(videoId, TEST_USERNAME)).willReturn(true);
+
+        UpdateVideoRequest updateRequest = new UpdateVideoRequest(longDescription);
+
+        mockMvc.perform(addAuth(put("/api/videos/{id}", videoId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isBadRequest())
+                // Optionally check the error message if Bean Validation sends details
+                .andExpect(result -> {
+                    String responseContent = result.getResponse().getContentAsString();
+                    // This check depends on how your exception handler formats validation errors
+                    // Assertions.assertThat(responseContent).contains("Description cannot exceed 255 characters");
+                    System.out.println("Validation error response: " + responseContent); // Log for debugging
+                });
+
+
+        verify(videoRepository, never()).save(any(Video.class));
+    }
+
+    // --- Test for successful update (ensure it uses valid length) ---
+    @Test
+    void updateVideoDescription_whenOwnerAndValid_shouldUpdateAndReturnOk() throws Exception {
+        Long videoId = 1L;
+        String oldDescription = "Old Description";
+        String newDescription = "Updated Description (length is ok)";
+        // Ensure description is within the new limit
+        assertThat(newDescription.length()).isLessThanOrEqualTo(255);
+
+        Video originalVideo = new Video(testUser, "update-test.mp4", oldDescription, Instant.now(), "path/update", 100L, VIDEO_MIME_TYPE);
+        originalVideo.setId(videoId);
+
+        UpdateVideoRequest updateRequest = new UpdateVideoRequest(newDescription);
+
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(originalVideo));
+        given(videoSecurityService.isOwner(videoId, TEST_USERNAME)).willReturn(true);
+        given(videoRepository.save(any(Video.class))).willAnswer(invocation -> invocation.getArgument(0));
+
+        mockMvc.perform(addAuth(put("/api/videos/{id}", videoId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(videoId))
+                .andExpect(jsonPath("$.description").value(newDescription));
+
+        ArgumentCaptor<Video> videoCaptor = ArgumentCaptor.forClass(Video.class);
+        verify(videoRepository).save(videoCaptor.capture());
+        assertThat(videoCaptor.getValue().getDescription()).isEqualTo(newDescription);
+    }
 
     // ============ DELETE TESTS ============
 
