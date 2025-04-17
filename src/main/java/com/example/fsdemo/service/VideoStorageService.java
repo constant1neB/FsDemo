@@ -5,6 +5,7 @@ import org.springframework.core.io.Resource; // Import Resource
 import org.springframework.web.multipart.MultipartFile;
 
 public interface VideoStorageService {
+
     /**
      * Stores the uploaded video file using a generated filename.
      *

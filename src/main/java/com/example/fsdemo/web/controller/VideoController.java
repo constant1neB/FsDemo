@@ -5,7 +5,6 @@ import com.example.fsdemo.repository.AppUserRepository;
 import com.example.fsdemo.domain.Video;
 import com.example.fsdemo.repository.VideoRepository;
 import com.example.fsdemo.service.VideoProcessingService;
-import com.example.fsdemo.exceptions.VideoStorageException;
 import com.example.fsdemo.service.VideoStorageService;
 import com.example.fsdemo.service.VideoSecurityService;
 import com.example.fsdemo.web.dto.EditOptions;
@@ -27,7 +26,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.io.IOException; // For magic bytes check
+import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
 import java.util.Arrays;
@@ -56,7 +55,7 @@ public class VideoController {
             EnumSet.of(Video.VideoStatus.UPLOADED, Video.VideoStatus.READY);
     // Define allowed file properties
     private static final String ALLOWED_EXTENSION = ".mp4";
-    private static final String ALLOWED_CONTENT_TYPE = "video/mp4"; // Be specific now
+    private static final String ALLOWED_CONTENT_TYPE = "video/mp4";
     // MP4 Magic Bytes (common signatures)
     // ftypisom (ISO Base Media file format)
     private static final byte[] MP4_MAGIC_BYTES_FTYP = new byte[]{0x66, 0x74, 0x79, 0x70};
@@ -147,27 +146,14 @@ public class VideoController {
         // *** TODO: Add Antivirus Scan Hook here if integrating ***
 
         // 3. Generate Secure Filename (UUID) - AFTER validation passes
-        String generatedFilename = UUID.randomUUID().toString() + ALLOWED_EXTENSION;
+        String generatedFilename = UUID.randomUUID() + ALLOWED_EXTENSION;
         log.info("Validation passed. Generated secure filename {} for original file '{}' uploaded by user {}", generatedFilename, sanitizedOriginalFilename, username);
 
-        String storagePath;
-        try {
-            // 4. Store the file using the GENERATED filename
-            log.debug("Calling storage service to store file for user {} with generated filename {}", username, generatedFilename);
-            storagePath = storageService.store(file, owner.getId(), generatedFilename);
-            log.debug("Storage service returned path: '{}' for generated filename: '{}'", storagePath, generatedFilename);
-            // We assume storagePath might be different from generatedFilename (e.g., includes subdirs)
-            // If storageService guarantees it only returns the filename, storagePath could be just generatedFilename;
-
-        } catch (VideoStorageException e) {
-            log.error("Storage failed for user {} (generated filename {}): {}", username, generatedFilename, e.getMessage(), e);
-            // Keep Internal Server Error for storage issues
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to store video", e);
-        } catch (IllegalArgumentException e) {
-            // Catch potential issues from filename generation/validation if any slip through
-            log.error("Internal error processing generated filename for user {}: {}", username, e.getMessage(), e);
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Internal error processing file details.", e);
-        }
+        // 4. Store the file using the GENERATED filename
+        log.debug("Calling storage service to store file for user {} with generated filename {}", username, generatedFilename);
+        String storagePath = storageService.store(file, owner.getId(), generatedFilename);
+        log.debug("Storage service returned path: '{}' for generated filename: '{}'", storagePath, generatedFilename);
+        // Let VideoStorageException or other RuntimeExceptions propagate
 
         // 5. Create Video Entity (Using generated filename, NOT original)
         Video video = new Video(
@@ -315,7 +301,7 @@ public class VideoController {
     }
 
     @GetMapping("/{id}/download")
-    public ResponseEntity<Resource> downloadVideo(@PathVariable Long id, Authentication authentication) {
+    public ResponseEntity<Resource> downloadVideo(@PathVariable Long id, Authentication authentication) throws IOException {
         String username = authentication.getName();
         log.debug("Download request received for video ID: {} from user: {}", id, username);
 
@@ -334,14 +320,9 @@ public class VideoController {
         }
 
         // 3. Load Resource from Storage
-        Resource resource;
-        try {
-            log.debug("Loading resource from storage path: {}", video.getStoragePath());
-            resource = storageService.load(video.getStoragePath());
-        } catch (VideoStorageException e) {
-            log.error("Download failed: Could not load video file from storage path: {} for video ID: {}", video.getStoragePath(), id, e);
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error retrieving video file", e);
-        }
+        log.debug("Loading resource from storage path: {}", video.getStoragePath());
+        Resource resource = storageService.load(video.getStoragePath());
+        // Let VideoStorageException propagate
 
         // Check if resource exists and is readable (basic check)
         if (!resource.exists() || !resource.isReadable()) {
@@ -349,20 +330,28 @@ public class VideoController {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error retrieving video file [exists/readable check failed]");
         }
 
-
         // 4. Generate New UUID Filename for Download
         // We don't want to expose the internal storage filename or the stored UUID.
-        String downloadFilename = UUID.randomUUID().toString() + ALLOWED_EXTENSION; // Reuse ALLOWED_EXTENSION
+        String downloadFilename = UUID.randomUUID() + ALLOWED_EXTENSION;
         log.info("Generated download filename: {} for video ID: {}", downloadFilename, id);
 
         // 5. Build Response
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(video.getMimeType())) // Use stored mime type
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + downloadFilename + "\"")
-                // Optional but recommended: Set Content-Length
-                // .contentLength(resource.contentLength()) // This requires handling IOException
-                .body(resource);
+        ResponseEntity.BodyBuilder responseBuilder = ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(video.getMimeType()))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + downloadFilename + "\"");
+        try {
+            // Attempt to set Content-Length
+            responseBuilder.contentLength(resource.contentLength());
+            log.debug("Successfully determined content length ({}) for video ID: {}", resource.contentLength(), id);
+        } catch (IOException e) {
+            // Log the error but proceed without the Content-Length header
+            log.warn("Could not determine content length for video ID: {} at path: {}. Proceeding without Content-Length header. Error: {}",
+                    id, video.getStoragePath(), e.getMessage());
+            // No need to re-throw or set error status here, just omit the header
+        }
+        return responseBuilder.body(resource);
     }
+
     @PutMapping("/{id}")
     @Transactional // Ensure DB operation is atomic
     public ResponseEntity<VideoResponse> updateVideoDescription(
@@ -435,36 +424,14 @@ public class VideoController {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Video metadata is inconsistent (missing storage path)");
         }
 
-        try {
-            log.trace("Attempting to delete video file from storage: {}", storagePath);
-            storageService.delete(storagePath);
-            log.info("Successfully deleted video file from storage: {}", storagePath);
-        } catch (VideoStorageException e) {
-            // If storage deletion fails, log the error and abort the operation.
-            // @Transactional will roll back the DB changes (though none have happened yet).
-            // We throw 500 because the system is in an inconsistent state (file might still exist).
-            log.error("Failed to delete video file from storage path: {} for video ID: {}", storagePath, id, e);
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete video file from storage", e);
-        } catch (Exception e) {
-            // Catch unexpected errors during deletion
-            log.error("Unexpected error during storage deletion for video ID: {}", id, e);
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected error during file deletion", e);
-        }
+        // Let VideoStorageException or other RuntimeExceptions propagate
+        log.trace("Attempting to delete video file from storage: {}", storagePath);
+        log.info("Successfully deleted video file from storage: {}", storagePath);
 
 
         // 4. Delete from Database (only if storage deletion succeeded)
-        try {
-            videoRepository.delete(video);
-            log.info("Successfully deleted video metadata from database for ID: {}", id);
-        } catch (Exception e) {
-            // This is less likely if findById worked, but handle defensively.
-            // If this fails after storage deletion, we have an inconsistency.
-            // @Transactional should ideally roll back, but the file is already gone.
-            // This highlights the challenge of distributed transactions. Logging is critical.
-            log.error("Failed to delete video metadata from database for ID: {} after storage deletion.", id, e);
-            // Consider logging the inconsistency for manual cleanup.
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete video metadata after deleting file", e);
-        }
+        videoRepository.delete(video);
+        log.info("Successfully deleted video metadata from database for ID: {}", id);
 
 
         // 5. Return No Content
@@ -512,5 +479,4 @@ public class VideoController {
         }
         return sb.toString().trim();
     }
-
 }

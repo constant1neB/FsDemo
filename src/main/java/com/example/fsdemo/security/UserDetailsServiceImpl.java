@@ -1,6 +1,5 @@
 package com.example.fsdemo.security;
 
-
 import com.example.fsdemo.domain.AppUser;
 import com.example.fsdemo.repository.AppUserRepository;
 import org.springframework.security.core.userdetails.User;
