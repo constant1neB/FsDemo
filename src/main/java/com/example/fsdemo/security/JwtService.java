@@ -179,8 +179,4 @@ public class JwtService {
             throw new IllegalStateException("SHA-256 Algorithm not found!", e);
         }
     }
-
-    public long getExpirationTime() {
-        return expirationTime;
-    }
 }

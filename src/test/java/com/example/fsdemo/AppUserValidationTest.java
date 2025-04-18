@@ -14,7 +14,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-public class AppUserValidationTest {
+class AppUserValidationTest {
 
     private static Validator validator;
 
@@ -38,7 +38,7 @@ public class AppUserValidationTest {
         AppUser user = new AppUser(null, "ValidPass123", "USER", "test@example.com");
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
         assertThat(violations).hasSize(1);
-        assertThat(violations.iterator().next().getPropertyPath().toString()).isEqualTo("username");
+        assertThat(violations.iterator().next().getPropertyPath().toString()).hasToString("username");
         assertThat(violations.iterator().next().getMessage()).contains("blank"); // Or specific message if set
     }
 
@@ -48,9 +48,10 @@ public class AppUserValidationTest {
     void whenUsernameIsBlank_thenViolation(String blankUsername) {
         AppUser user = new AppUser(blankUsername, "ValidPass123", "USER", "test@example.com");
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
-        assertThat(violations).isNotEmpty();
-        assertThat(violations).anyMatch(violation ->
-                violation.getPropertyPath().toString().equals("username") && violation.getMessage().contains("blank"));
+        assertThat(violations)
+                .isNotEmpty()
+                .anyMatch(violation ->
+                        violation.getPropertyPath().toString().equals("username") && violation.getMessage().contains("blank"));
     }
 
     @ParameterizedTest
@@ -60,7 +61,7 @@ public class AppUserValidationTest {
         AppUser user = new AppUser(invalidSizeUsername, "ValidPass123", "USER", "test@example.com");
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
         assertThat(violations).hasSize(1);
-        assertThat(violations.iterator().next().getPropertyPath().toString()).isEqualTo("username");
+        assertThat(violations.iterator().next().getPropertyPath().toString()).hasToString("username");
         assertThat(violations.iterator().next().getMessage()).contains("size must be between");
     }
 
@@ -70,7 +71,7 @@ public class AppUserValidationTest {
         AppUser user = new AppUser("validuser", null, "USER", "test@example.com");
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
         assertThat(violations).hasSize(1);
-        assertThat(violations.iterator().next().getPropertyPath().toString()).isEqualTo("password");
+        assertThat(violations.iterator().next().getPropertyPath().toString()).hasToString("password");
         assertThat(violations.iterator().next().getMessage()).contains("blank");
     }
 
@@ -80,15 +81,16 @@ public class AppUserValidationTest {
         AppUser user = new AppUser("validuser", blankPassword, "USER", "test@example.com");
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
 
-        assertThat(violations).hasSize(2);
-        assertThat(violations).anyMatch(v ->
-                v.getPropertyPath().toString().equals("password") &&
-                        v.getMessage().contains("Password cannot be blank") // Use the exact message
-        );
-        assertThat(violations).anyMatch(v ->
-                v.getPropertyPath().toString().equals("password") &&
-                        v.getMessage().contains("Password size must be between 12 and 70 characters") // Use the exact message
-        );
+        assertThat(violations)
+                .hasSize(2)
+                .anyMatch(v ->
+                        v.getPropertyPath().toString().equals("password") &&
+                                v.getMessage().contains("Password cannot be blank") // Use the exact message
+                )
+                .anyMatch(v ->
+                        v.getPropertyPath().toString().equals("password") &&
+                                v.getMessage().contains("Password size must be between 12 and 70 characters") // Use the exact message
+                );
     }
 
     @ParameterizedTest
@@ -97,11 +99,11 @@ public class AppUserValidationTest {
     void whenPasswordIsTooShort_thenViolation(String shortPassword) {
         AppUser user = new AppUser("validuser", shortPassword, "USER", "test@example.com");
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
-        assertThat(violations).hasSize(1);
-        assertThat(violations).anyMatch(v ->
-                v.getPropertyPath().toString().equals("password") &&
-                        v.getMessage().contains("size must be between 12 and 70 characters")
-        );
+        assertThat(violations).hasSize(1)
+                .anyMatch(v ->
+                        v.getPropertyPath().toString().equals("password") &&
+                                v.getMessage().contains("size must be between 12 and 70 characters")
+                );
     }
 
     @Test
@@ -110,7 +112,7 @@ public class AppUserValidationTest {
         AppUser user = new AppUser("validuser", longPassword, "USER", "test@example.com");
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
         assertThat(violations).hasSize(1);
-        assertThat(violations.iterator().next().getPropertyPath().toString()).isEqualTo("password");
+        assertThat(violations.iterator().next().getPropertyPath().toString()).hasToString("password");
         // Check for the message defined in the @Size annotation
         assertThat(violations.iterator().next().getMessage()).contains("size must be between 12 and 70 characters");
     }
@@ -137,7 +139,7 @@ public class AppUserValidationTest {
         AppUser user = new AppUser("validuser", "ValidPass123", null, "test@example.com");
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
         assertThat(violations).hasSize(1);
-        assertThat(violations.iterator().next().getPropertyPath().toString()).isEqualTo("role");
+        assertThat(violations.iterator().next().getPropertyPath().toString()).hasToString("role");
         assertThat(violations.iterator().next().getMessage()).contains("blank");
     }
 
@@ -147,8 +149,8 @@ public class AppUserValidationTest {
         // Note: Email is nullable in DB, but let's assume it's required for registration/update
         AppUser user = new AppUser("validuser", "ValidPass123", "USER", null);
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
-        assertThat(violations).isNotEmpty();
-        assertThat(violations).anyMatch(violation -> violation.getPropertyPath().toString().equals("email"));
+        assertThat(violations).isNotEmpty()
+                .anyMatch(violation -> violation.getPropertyPath().toString().equals("email"));
     }
 
     @ParameterizedTest
@@ -156,8 +158,8 @@ public class AppUserValidationTest {
     void whenEmailIsBlank_thenViolation(String blankEmail) {
         AppUser user = new AppUser("validuser", "ValidPass123", "USER", blankEmail);
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
-        assertThat(violations).isNotEmpty();
-        assertThat(violations).anyMatch(v -> v.getPropertyPath().toString().equals("email") && v.getMessage().contains("blank"));
+        assertThat(violations).isNotEmpty()
+                .anyMatch(v -> v.getPropertyPath().toString().equals("email") && v.getMessage().contains("blank"));
     }
 
     @ParameterizedTest
@@ -170,7 +172,7 @@ public class AppUserValidationTest {
         AppUser user = new AppUser("validuser", "ValidPass123", "USER", invalidEmail);
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
         assertThat(violations).hasSize(1);
-        assertThat(violations.iterator().next().getPropertyPath().toString()).isEqualTo("email");
+        assertThat(violations.iterator().next().getPropertyPath().toString()).hasToString("email");
         assertThat(violations.iterator().next().getMessage()).contains("must be a well-formed email address");
     }
 }

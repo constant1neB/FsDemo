@@ -17,11 +17,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 @Service
-public class FilesystemVideoStorageService implements VideoStorageService {
-    private static final Logger log = LoggerFactory.getLogger(FilesystemVideoStorageService.class); // Add logger
+public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
+    private static final Logger log = LoggerFactory.getLogger(FilesystemVideoStorageServiceImpl.class); // Add logger
     private final Path rootLocation;
 
-    public FilesystemVideoStorageService(@Value("${video.storage.path:./uploads/videos}") String path) {
+    public FilesystemVideoStorageServiceImpl(@Value("${video.storage.path:./uploads/videos}") String path) {
         this.rootLocation = Paths.get(path).toAbsolutePath().normalize();
         try {
             Files.createDirectories(rootLocation);
@@ -55,7 +55,6 @@ public class FilesystemVideoStorageService implements VideoStorageService {
                 log.warn("Attempted to store file that already exists (UUID collision?): {}", destinationFile);
                 // Decide policy: overwrite or fail. Failing is safer.
                 throw new VideoStorageException("File already exists: " + generatedFilename);
-                // Or: Files.copy(file.getInputStream(), destinationFile, StandardCopyOption.REPLACE_EXISTING);
             }
 
             log.debug("Storing file {} to {}", generatedFilename, destinationFile);

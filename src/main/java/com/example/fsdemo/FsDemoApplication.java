@@ -28,7 +28,7 @@ public class FsDemoApplication implements CommandLineRunner {
     }
 
     @Override
-    public void run(String... args) throws Exception {
+    public void run(String... args) {
         String user1pwd = "password";
         String hashedUser1Pwd = argon2Encoder.encode(user1pwd);
         urepository.save(new AppUser("user1", hashedUser1Pwd, "user", "user@example.com"));

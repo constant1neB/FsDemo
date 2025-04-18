@@ -6,7 +6,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -26,25 +25,16 @@ import java.util.List;
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
-    private final UserDetailsServiceImpl userDetailsService;
     private final AuthenticationFilter authenticationFilter;
     private final AuthEntryPoint exceptionHandler;
 
     @Value("${cors.allowed.origins:*}") // Default to all for easy dev, restrict in prod
     private String[] allowedOrigins;
 
-    public SecurityConfig(UserDetailsServiceImpl userDetailsService,
-                          AuthenticationFilter authenticationFilter,
+    public SecurityConfig(AuthenticationFilter authenticationFilter,
                           AuthEntryPoint exceptionHandler) {
-        this.userDetailsService = userDetailsService;
         this.authenticationFilter = authenticationFilter;
         this.exceptionHandler = exceptionHandler;
-    }
-
-    // Configure global authentication manager (optional if using AuthenticationConfiguration)
-    public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-        auth.userDetailsService(userDetailsService)
-                .passwordEncoder(argon2PasswordEncoder());
     }
 
     @Bean
@@ -101,7 +91,7 @@ public class SecurityConfig {
                 // Add our custom filter BEFORE the standard UsernamePasswordAuthenticationFilter
                 .addFilterBefore(authenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 // Configure exception handling, specifically for authentication errors
-                .exceptionHandling((exceptionHandling) ->
+                .exceptionHandling(exceptionHandling ->
                         exceptionHandling.authenticationEntryPoint(exceptionHandler)
                 );
 

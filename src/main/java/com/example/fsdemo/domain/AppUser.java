@@ -16,7 +16,7 @@ public class AppUser {
 
     @NotBlank(message = "Username cannot be blank")
     @Size(min = 3, max = 20, message = "Username size must be between 3 and 20 characters")
-    @Pattern(regexp = "^[a-zA-Z0-9_]+$", message = "Username can only contain letters, numbers, and underscores")
+    @Pattern(regexp = "^\\w+$", message = "Username can only contain letters, numbers, and underscores")
     @Column(nullable = false, unique = true)
     private String username;
 

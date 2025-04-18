@@ -129,7 +129,8 @@ class GlobalExceptionHandlerTest {
     // --- Bean Validation Exceptions ---
 
     // Helper DTO for validation tests
-    private record TestDto(@NotBlank String name, @Size(min = 5) String value) {}
+    private record TestDto(@NotBlank String name, @Size(min = 5) String value) {
+    }
 
     @Nested
     @DisplayName("ConstraintViolationException Handling")
@@ -140,27 +141,27 @@ class GlobalExceptionHandlerTest {
             // Simulate a ConstraintViolationException
             try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
                 Validator validator = factory.getValidator();
-            Set<ConstraintViolation<TestDto>> violations = validator.validate(new TestDto("Test", "123")); // "value" is too short
-            ConstraintViolationException ex = new ConstraintViolationException("Validation failed", violations);
+                Set<ConstraintViolation<TestDto>> violations = validator.validate(new TestDto("Test", "123")); // "value" is too short
+                ConstraintViolationException ex = new ConstraintViolationException("Validation failed", violations);
 
-            ProblemDetail problemDetail = globalExceptionHandler.handleConstraintViolationException(ex, webRequest);
+                ProblemDetail problemDetail = globalExceptionHandler.handleConstraintViolationException(ex, webRequest);
 
-            assertThat(problemDetail).isNotNull();
-            assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST.value());
-            assertThat(problemDetail.getTitle()).isEqualTo("Validation Failed");
-            assertThat(problemDetail.getDetail()).isEqualTo("Input validation failed. Check the 'errors' field for details.");
-            assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
-            assertThat(problemDetail.getProperties()).containsKey("timestamp");
-            assertThat(problemDetail.getProperties()).containsKey("errors");
+                assertThat(problemDetail).isNotNull();
+                assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST.value());
+                assertThat(problemDetail.getTitle()).isEqualTo("Validation Failed");
+                assertThat(problemDetail.getDetail()).isEqualTo("Input validation failed. Check the 'errors' field for details.");
+                assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
+                assertThat(problemDetail.getProperties()).containsKey("timestamp");
+                assertThat(problemDetail.getProperties()).containsKey("errors");
 
-            @SuppressWarnings("unchecked")
-            Map<String, String> errors = (Map<String, String>) Objects.requireNonNull(problemDetail.getProperties()).get("errors");
-            assertThat(errors).hasSize(1);
-            assertThat(errors.get("value"))
-                    .isIn(
-                            "size must be between 5 and 2147483647", // English
-                            "размер должен находиться в диапазоне от 5 до 2147483647" // Russian
-                    );
+                @SuppressWarnings("unchecked")
+                Map<String, String> errors = (Map<String, String>) Objects.requireNonNull(problemDetail.getProperties()).get("errors");
+                assertThat(errors).hasSize(1);
+                assertThat(errors.get("value"))
+                        .isIn(
+                                "size must be between 5 and 2147483647", // English
+                                "размер должен находиться в диапазоне от 5 до 2147483647" // Russian
+                        );
             }
         }
     }
@@ -203,8 +204,10 @@ class GlobalExceptionHandlerTest {
                     .hasSize(1)
                     .containsEntry("name", "must not be blank");
         }
-        // Dummy method needed for MethodParameter creation
-        void dummyMethod(TestDto dto) {}
+
+        void dummyMethod(TestDto dto) {
+            // Dummy method needed for MethodParameter creation
+        }
     }
 
     @Nested

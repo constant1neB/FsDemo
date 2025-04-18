@@ -65,8 +65,7 @@ class VideoProcessingServiceImplTest {
     private final String originalStoragePath = "original/path/video.mp4";
     private Resource mockResource;
 
-    @Captor
-    private ArgumentCaptor<List<String>> commandCaptor;
+
     @Captor
     private ArgumentCaptor<Video> videoSaveCaptor;
 
@@ -103,20 +102,6 @@ class VideoProcessingServiceImplTest {
 
     }
 
-    // Helper to find temp file
-    private Path findTempFile(String prefix, String suffix) throws IOException {
-        try (Stream<Path> stream = Files.list(temporaryStorageLocation)) {
-            return stream.filter(p -> {
-                        String name = p.getFileName().toString();
-                        // Ensure it's a file, starts with prefix, ends with suffix
-                        return Files.isRegularFile(p) && name.startsWith(prefix) && name.endsWith(suffix);
-                    })
-                    .findFirst()
-                    .orElseThrow(() -> new FileNotFoundException(
-                            "Temp file matching '" + prefix + "*'" + suffix + "' not found in " + temporaryStorageLocation));
-        }
-    }
-
     // --- Test Cases ---
 
     @Test
@@ -146,7 +131,7 @@ class VideoProcessingServiceImplTest {
         InOrder inOrder = Mockito.inOrder(videoRepository, videoStorageService, videoProcessingService);
         inOrder.verify(videoRepository).findById(videoId);
         inOrder.verify(videoStorageService).load(originalStoragePath);
-        inOrder.verify(videoProcessingService).executeFfmpegProcess(eq(commandCaptorForSuccess.getValue()), eq(videoId));
+        inOrder.verify(videoProcessingService).executeFfmpegProcess(commandCaptorForSuccess.getValue(), videoId);
         inOrder.verify(videoRepository).save(videoSaveCaptor.capture());
 
         // Verify Status and Path
@@ -160,7 +145,7 @@ class VideoProcessingServiceImplTest {
 
         // Temp dir should be empty after cleanup
         try (Stream<Path> stream = Files.list(temporaryStorageLocation)) {
-            assertThat(stream.count()).isEqualTo(0);
+            assertThat(stream.count()).isZero();
         } catch (IOException e) {
             fail("Failed to list temporary directory for cleanup check", e);
         }
@@ -169,11 +154,9 @@ class VideoProcessingServiceImplTest {
     @Test
     void processVideoEdits_whenFfmpegFails_shouldUpdateStatusToFailedAndCleanup() throws Exception {
         // Arrange
-        // --- Add necessary stubbings here ---
         given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
         given(videoStorageService.load(originalStoragePath)).willReturn(mockResource);
         given(videoRepository.save(any(Video.class))).willAnswer(invocation -> invocation.getArgument(0));
-        // --- End stubbings ---
 
         RuntimeException ffmpegError = new RuntimeException("FFmpeg processing failed with exit code 1.");
         doThrow(ffmpegError).when(videoProcessingService).executeFfmpegProcess(anyList(), eq(videoId));
@@ -191,18 +174,16 @@ class VideoProcessingServiceImplTest {
         assertThat(savedVideo.getStatus()).isEqualTo(VideoStatus.FAILED);
         assertThat(savedVideo.getProcessedStoragePath()).isNull();
 
-        assertThat(processedStorageLocation.toFile().list()).isEmpty();
+        assertThat(processedStorageLocation.toFile()).isEmptyDirectory();
         assertThat(Files.list(temporaryStorageLocation)).isEmpty();
     }
 
     @Test
     void processVideoEdits_whenTimeout_shouldUpdateStatusToFailedAndCleanup() throws Exception {
         // Arrange
-        // --- Add necessary stubbings here ---
         given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
         given(videoStorageService.load(originalStoragePath)).willReturn(mockResource);
         given(videoRepository.save(any(Video.class))).willAnswer(invocation -> invocation.getArgument(0));
-        // --- End stubbings ---
 
         TimeoutException timeoutError = new TimeoutException("FFmpeg process timed out");
         doThrow(timeoutError).when(videoProcessingService).executeFfmpegProcess(anyList(), eq(videoId));
@@ -220,19 +201,17 @@ class VideoProcessingServiceImplTest {
         assertThat(savedVideo.getStatus()).isEqualTo(VideoStatus.FAILED);
         assertThat(savedVideo.getProcessedStoragePath()).isNull();
 
-        assertThat(processedStorageLocation.toFile().list()).isEmpty();
+        assertThat(processedStorageLocation.toFile()).isEmptyDirectory();
         assertThat(Files.list(temporaryStorageLocation)).isEmpty();
     }
 
     @Test
     void processVideoEdits_whenStorageLoadFails_shouldUpdateStatusToFailed() throws Exception {
         // Arrange
-        // --- Add necessary stubbings here ---
         given(videoRepository.findById(videoId)).willReturn(Optional.of(video)); // Needed for failure update
         given(videoStorageService.load(originalStoragePath))
                 .willThrow(new VideoStorageException("Cannot load resource"));
         given(videoRepository.save(any(Video.class))).willAnswer(invocation -> invocation.getArgument(0)); // Needed for failure update
-        // --- End stubbings ---
 
         // Act
         videoProcessingService.processVideoEdits(videoId, defaultOptions, username);
@@ -252,10 +231,7 @@ class VideoProcessingServiceImplTest {
     @Test
     void processVideoEdits_whenVideoNotFoundDuringExecution_shouldThrowAndNotSave() throws IOException, InterruptedException, TimeoutException {
         // Arrange
-        // --- Add necessary stubbings here ---
         given(videoRepository.findById(videoId)).willReturn(Optional.empty());
-        // No other stubbings needed as it fails early
-        // --- End stubbings ---
 
         // Act & Assert
         assertThatThrownBy(() -> videoProcessingService.processVideoEdits(videoId, defaultOptions, username))
@@ -272,10 +248,7 @@ class VideoProcessingServiceImplTest {
     void processVideoEdits_whenVideoNotInProcessingState_shouldLogWarningAndNotProceed() throws Exception {
         // Arrange
         video.setStatus(VideoStatus.READY);
-        // --- Add necessary stubbings here ---
         given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-        // No other stubbings needed
-        // --- End stubbings ---
 
         // Act
         videoProcessingService.processVideoEdits(videoId, defaultOptions, username);
@@ -289,17 +262,15 @@ class VideoProcessingServiceImplTest {
 
 
     // --- Tests for buildFfmpegCommand (using ReflectionTestUtils) ---
-    // These tests don't need the general stubbings, so they won't cause UnnecessaryStubbingException
 
     @Test
-    void buildFfmpegCommand_withAllOptions_shouldGenerateCorrectArguments() throws Exception {
+    void buildFfmpegCommand_withAllOptions_shouldGenerateCorrectArguments() {
         // Arrange
         Path input = temporaryStorageLocation.resolve("input.mp4");
         Path output = temporaryStorageLocation.resolve("output.mp4");
         EditOptions options = new EditOptions(10.5, 55.0, true, 480);
 
-        @SuppressWarnings("unchecked")
-        List<String> command = (List<String>) ReflectionTestUtils.invokeMethod(
+        List<String> command = ReflectionTestUtils.invokeMethod(
                 videoProcessingService, "buildFfmpegCommand", input, output, options);
 
         assertThat(command).containsExactly(
@@ -315,13 +286,12 @@ class VideoProcessingServiceImplTest {
     }
 
     @Test
-    void buildFfmpegCommand_withMuteFalse_shouldCopyAudio() throws Exception {
+    void buildFfmpegCommand_withMuteFalse_shouldCopyAudio() {
         Path input = temporaryStorageLocation.resolve("input.mp4");
         Path output = temporaryStorageLocation.resolve("output.mp4");
         EditOptions options = new EditOptions(null, null, false, null);
 
-        @SuppressWarnings("unchecked")
-        List<String> command = (List<String>) ReflectionTestUtils.invokeMethod(
+        List<String> command = ReflectionTestUtils.invokeMethod(
                 videoProcessingService, "buildFfmpegCommand", input, output, options);
 
         assertThat(command)
@@ -331,13 +301,12 @@ class VideoProcessingServiceImplTest {
     }
 
     @Test
-    void buildFfmpegCommand_withNoOptions_shouldGenerateBasicCommand() throws Exception {
+    void buildFfmpegCommand_withNoOptions_shouldGenerateBasicCommand() {
         Path input = temporaryStorageLocation.resolve("input.mp4");
         Path output = temporaryStorageLocation.resolve("output.mp4");
         EditOptions options = new EditOptions(null, null, false, null);
 
-        @SuppressWarnings("unchecked")
-        List<String> command = (List<String>) ReflectionTestUtils.invokeMethod(
+        List<String> command = ReflectionTestUtils.invokeMethod(
                 videoProcessingService, "buildFfmpegCommand", input, output, options);
 
         assertThat(command).containsExactly(
