@@ -3,6 +3,7 @@ package com.example.fsdemo.service;
 import com.example.fsdemo.domain.AppUser;
 import com.example.fsdemo.domain.Video;
 import com.example.fsdemo.domain.Video.VideoStatus;
+import com.example.fsdemo.exceptions.FfmpegProcessingException;
 import com.example.fsdemo.exceptions.VideoStorageException;
 import com.example.fsdemo.repository.VideoRepository;
 import com.example.fsdemo.service.impl.VideoProcessingServiceImpl;
@@ -47,7 +48,6 @@ class VideoProcessingServiceImplTest {
     @Mock
     private VideoStorageService videoStorageService;
 
-    // Service under test - Manual Spy Creation
     private VideoProcessingServiceImpl videoProcessingService;
 
     @TempDir
@@ -93,7 +93,8 @@ class VideoProcessingServiceImplTest {
         // Setup Video Entity
         AppUser owner = new AppUser(username, "pass", "USER", "test@test.com");
         String generatedFilename = UUID.randomUUID() + ".mp4";
-        video = new Video(owner, generatedFilename, "Test", Instant.now(), originalStoragePath, 1024L, "video/mp4");
+        video = new Video(owner, generatedFilename, "Test", Instant.now(),
+                originalStoragePath, 1024L, "video/mp4");
         video.setId(videoId);
         video.setStatus(VideoStatus.PROCESSING);
 
@@ -158,7 +159,9 @@ class VideoProcessingServiceImplTest {
         given(videoStorageService.load(originalStoragePath)).willReturn(mockResource);
         given(videoRepository.save(any(Video.class))).willAnswer(invocation -> invocation.getArgument(0));
 
-        RuntimeException ffmpegError = new RuntimeException("FFmpeg processing failed with exit code 1.");
+        // Simulate throwing the new specific exception
+        FfmpegProcessingException ffmpegError = new FfmpegProcessingException(
+                "FFmpeg processing failed test", 1, "Mock stderr content");
         doThrow(ffmpegError).when(videoProcessingService).executeFfmpegProcess(anyList(), eq(videoId));
 
         // Act
@@ -167,7 +170,7 @@ class VideoProcessingServiceImplTest {
         // Assert
         then(videoRepository).should(times(2)).findById(videoId); // Initial + failure update
         then(videoStorageService).should().load(originalStoragePath);
-        then(videoProcessingService).should().executeFfmpegProcess(anyList(), eq(videoId));
+        then(videoProcessingService).should().executeFfmpegProcess(anyList(), eq(videoId)); // Verify the call happened
         then(videoRepository).should().save(videoSaveCaptor.capture());
 
         Video savedVideo = videoSaveCaptor.getValue();

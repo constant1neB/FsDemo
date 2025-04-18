@@ -2,6 +2,7 @@ package com.example.fsdemo.web.controller;
 
 import com.example.fsdemo.domain.AccountCredentials;
 import com.example.fsdemo.security.JwtService;
+import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -31,7 +32,7 @@ public class LoginController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<Object> login(@RequestBody AccountCredentials creds) {
+    public ResponseEntity<Object> login(@Valid @RequestBody AccountCredentials creds) {
 
         // 1. Authenticate user credentials
         var credentials = new UsernamePasswordAuthenticationToken(creds.username(), creds.password());
@@ -60,10 +61,10 @@ public class LoginController {
         // Set it to JWT expiration for simplicity, or slightly less.
 
         ResponseCookie fingerprintCookie = ResponseCookie.from(JwtService.FINGERPRINT_COOKIE_NAME, userFingerprint)
-                .httpOnly(true)   // Prevent access via JavaScript
-                .secure(true)     // Only send over HTTPS
+                .httpOnly(true)     // Prevent access via JavaScript
+                .secure(true)       // Only send over HTTPS
                 .sameSite("Strict") // Prevent CSRF by not sending cookie on cross-site requests
-                .path("/")        // Make cookie available for all paths
+                .path("/")          // Make cookie available for all paths
                 .build();
         log.debug("Setting fingerprint cookie for user: {}", username);
 

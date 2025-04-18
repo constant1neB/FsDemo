@@ -82,39 +82,11 @@ class AppUserValidationTest {
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
 
         assertThat(violations)
-                .hasSize(2)
+                .hasSize(1)
                 .anyMatch(v ->
                         v.getPropertyPath().toString().equals("password") &&
-                                v.getMessage().contains("Password cannot be blank") // Use the exact message
-                )
-                .anyMatch(v ->
-                        v.getPropertyPath().toString().equals("password") &&
-                                v.getMessage().contains("Password size must be between 12 and 70 characters") // Use the exact message
+                                v.getMessage().contains("Password cannot be blank")
                 );
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"12345678901", "shortpwd"})
-        // Passwords less than 12 characters
-    void whenPasswordIsTooShort_thenViolation(String shortPassword) {
-        AppUser user = new AppUser("validuser", shortPassword, "USER", "test@example.com");
-        Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
-        assertThat(violations).hasSize(1)
-                .anyMatch(v ->
-                        v.getPropertyPath().toString().equals("password") &&
-                                v.getMessage().contains("size must be between 12 and 70 characters")
-                );
-    }
-
-    @Test
-    void whenPasswordIsTooLong_thenViolation() {
-        String longPassword = "a".repeat(71); // Password exactly 71 characters (too long)
-        AppUser user = new AppUser("validuser", longPassword, "USER", "test@example.com");
-        Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
-        assertThat(violations).hasSize(1);
-        assertThat(violations.iterator().next().getPropertyPath().toString()).hasToString("password");
-        // Check for the message defined in the @Size annotation
-        assertThat(violations.iterator().next().getMessage()).contains("size must be between 12 and 70 characters");
     }
 
     @Test

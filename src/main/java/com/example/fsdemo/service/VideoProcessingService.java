@@ -1,5 +1,6 @@
 package com.example.fsdemo.service;
 
+import com.example.fsdemo.exceptions.FfmpegProcessingException;
 import com.example.fsdemo.web.dto.EditOptions;
 
 import java.io.IOException;
@@ -21,14 +22,14 @@ public interface VideoProcessingService {
     /**
      * Executes the FFmpeg process using ProcessBuilder.
      * Handles stream reading and timeout.
-     * Throws RuntimeException on failure or timeout.
      *
      * @param command The command list to execute.
      * @param videoId The ID of the video being processed (for logging).
-     * @throws IOException        If ProcessBuilder fails to start.
-     * @throws InterruptedException If waiting for the process is interrupted.
-     * @throws RuntimeException     If FFmpeg returns non-zero exit code.
-     * @throws TimeoutException     If FFmpeg process exceeds timeout.
+     * @throws IOException               If ProcessBuilder fails to start or stream reading fails.
+     * @throws InterruptedException      If waiting for the process is interrupted.
+     * @throws FfmpegProcessingException If FFmpeg returns non-zero exit code or another processing error occurs.
+     * @throws TimeoutException          If FFmpeg process or stream reading exceeds timeout.
      */
-    void executeFfmpegProcess(List<String> command, Long videoId) throws IOException, InterruptedException, RuntimeException, TimeoutException;
+    void executeFfmpegProcess(List<String> command, Long videoId)
+            throws IOException, InterruptedException, FfmpegProcessingException, TimeoutException;
 }

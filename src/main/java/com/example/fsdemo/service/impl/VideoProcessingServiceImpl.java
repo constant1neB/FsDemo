@@ -7,6 +7,7 @@ import com.example.fsdemo.repository.VideoRepository;
 import com.example.fsdemo.service.VideoProcessingService;
 import com.example.fsdemo.service.VideoStorageService;
 import com.example.fsdemo.web.dto.EditOptions;
+import com.example.fsdemo.exceptions.FfmpegProcessingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -40,7 +41,7 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
 
 
     private final Path processedStorageLocation;
-    private final Path temporaryStorageLocation; // For intermediate files
+    private final Path temporaryStorageLocation;
     private final String ffmpegExecutablePath;
     private static final long FFMPEG_TIMEOUT_SECONDS = 120;
 
@@ -64,7 +65,6 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             log.info("Using ffmpeg executable at: {}", this.ffmpegExecutablePath);
         } catch (IOException e) {
             log.error("Could not initialize processed or temporary storage directory", e);
-            // Decide if this should prevent startup
             throw new VideoStorageException("Could not initialize storage directories", e);
         }
     }
@@ -91,10 +91,10 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             return;
         }
 
-        Resource originalResource = null;
+        Resource originalResource;
         Path tempInputPath = null;
         Path tempOutputPath = null;
-        String finalProcessedFilename = null;
+        String finalProcessedFilename;
 
         try {
             log.debug("[Async] Loading original resource from storage path: {}", video.getStoragePath());
@@ -167,71 +167,69 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
      *
      * @param command The command list to execute.
      * @param videoId The ID of the video being processed (for logging).
-     * @throws IOException        If ProcessBuilder fails to start.
+     * @throws IOException          If ProcessBuilder fails to start.
      * @throws InterruptedException If waiting for the process is interrupted.
      * @throws RuntimeException     If FFmpeg returns non-zero exit code.
      * @throws TimeoutException     If FFmpeg process exceeds timeout.
      */
     public void executeFfmpegProcess(List<String> command, Long videoId)
-            throws IOException, InterruptedException, RuntimeException, TimeoutException {
+            throws IOException, InterruptedException, FfmpegProcessingException, TimeoutException {
 
         Process ffmpegProcess = null;
-        // Use try-with-resources for ExecutorService
+
         try (ExecutorService streamReaderExecutor = Executors.newVirtualThreadPerTaskExecutor()) {
 
             ProcessBuilder processBuilder = new ProcessBuilder(command);
             ffmpegProcess = processBuilder.start();
 
             final Process currentProcess = ffmpegProcess;
-            Future<String> stdErrFuture = streamReaderExecutor.submit(() -> readStream(currentProcess.getErrorStream(), "STDERR"));
-            Future<String> stdOutFuture = streamReaderExecutor.submit(() -> readStream(currentProcess.getInputStream(), "STDOUT"));
+            Future<String> stdErrFuture = streamReaderExecutor.submit(() ->
+                    readStream(currentProcess.getErrorStream(), "STDERR"));
+            Future<String> stdOutFuture = streamReaderExecutor.submit(() ->
+                    readStream(currentProcess.getInputStream(), "STDOUT"));
 
             boolean finished = ffmpegProcess.waitFor(FFMPEG_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             if (!finished) {
-                log.error("[Async] FFmpeg process timed out after {} seconds for video ID: {}. Attempting to destroy.", FFMPEG_TIMEOUT_SECONDS, videoId);
-                // No need to destroy here, finally block will handle it.
-                throw new TimeoutException("FFmpeg process timed out for video ID: " + videoId); // Throw specific exception
+                log.error("[Async] FFmpeg process timed out after {} seconds for video ID: {}. Attempting to destroy.",
+                        FFMPEG_TIMEOUT_SECONDS, videoId);
+                throw new TimeoutException("FFmpeg process timed out for video ID: " + videoId);
             }
 
             int exitCode = ffmpegProcess.exitValue();
-            // Use get(timeout, TimeUnit) to avoid hanging indefinitely if stream reading fails
-            String stdErrOutput = stdErrFuture.get(10, TimeUnit.SECONDS); // Add a timeout for getting stream results
-            String stdOutOutput = stdOutFuture.get(10, TimeUnit.SECONDS); // Add a timeout for getting stream results
-
+            String stdErrOutput = stdErrFuture.get(10, TimeUnit.SECONDS);
+            String stdOutOutput = stdOutFuture.get(10, TimeUnit.SECONDS);
 
             log.debug("[Async] FFmpeg STDOUT for video {}:\n{}", videoId, stdOutOutput);
 
             if (exitCode != 0) {
-                log.error("[Async] FFmpeg failed with exit code {} for video ID: {}", exitCode, videoId);
+                String errorMsg = "FFmpeg processing failed with exit code " + exitCode + ".";
+                log.error("[Async] {} for video ID: {}", errorMsg, videoId);
                 log.error("[Async] FFmpeg STDERR for video {}:\n{}", videoId, stdErrOutput);
-                throw new RuntimeException("FFmpeg processing failed with exit code " + exitCode + ". Error: " + stdErrOutput); // Include stderr in exception
+                throw new FfmpegProcessingException(errorMsg, exitCode, stdErrOutput);
             }
-            // Success case, exit code 0
             log.info("[Async] FFmpeg subprocess finished successfully for video ID: {}", videoId);
 
-        } catch (InterruptedException | IOException e) {
+        } catch (IOException | InterruptedException | TimeoutException e) {
+            // Catch and re-throw the specific declared checked exceptions
             log.error("[Async] Error executing or waiting for FFmpeg process for video ID {}: {}", videoId, e.getMessage());
-            // Re-throw IOException and InterruptedException to be handled by the main catch block
             throw e;
-        } catch (TimeoutException e) {
-            // Catch the specific TimeoutException from waitFor or Future.get
-            log.error("[Async] FFmpeg process or stream reading timed out for video ID {}: {}", videoId, e.getMessage());
-            throw e; // Re-throw the TimeoutException
-        } catch (ExecutionException e) { // Catch exceptions from Future.get()
-            log.error("[Async] Error getting stream output for video ID {}: {}", videoId, e.getMessage());
-            throw new RuntimeException("Error reading FFmpeg stream output for video ID " + videoId, e);
-        } catch (Exception e) { // Catch other unexpected errors
+        } catch (ExecutionException e) {
+            // Catch exceptions from Future.get()
+            log.error("[Async] Error getting stream output for video ID {}: {}", videoId, e.getCause() != null ? e.getCause().getMessage() : e.getMessage(), e);
+            throw new FfmpegProcessingException("Error reading FFmpeg stream output for video ID " + videoId, e);
+        } catch (Exception e) {
+            // Catch other unexpected errors
             log.error("[Async] Unexpected error during FFmpeg execution for video ID {}: {}", videoId, e.getMessage(), e);
-            throw new RuntimeException("Unexpected error during FFmpeg execution for video ID " + videoId, e);
-        }
-        finally {
+            throw (RuntimeException) e;
+        } finally {
             if (ffmpegProcess != null && ffmpegProcess.isAlive()) {
                 log.warn("[Async] Forcibly destroying lingering FFmpeg process for video ID: {}", videoId);
                 ffmpegProcess.destroyForcibly();
             }
         }
     }
+
 
     /**
      * Builds the FFmpeg command line arguments based on edit options.
@@ -289,17 +287,14 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
      * Helper method to read an InputStream (like stdout or stderr) into a String.
      */
     private String readStream(InputStream inputStream, String streamName) {
-        // Use try-with-resources for BufferedReader
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
-            // Use lines().collect() for cleaner stream reading
             String content = reader.lines().collect(Collectors.joining(System.lineSeparator()));
-            log.trace("Finished reading stream: {}", streamName); // Log when done reading
+            log.trace("Finished reading stream: {}", streamName);
             return content;
         } catch (IOException e) {
             log.error("Error reading stream {}: {}", streamName, e.getMessage());
             return "[Error reading stream: " + e.getMessage() + "]";
         } catch (Exception e) {
-            // Catch unexpected errors during stream processing
             log.error("Unexpected error reading stream {}: {}", streamName, e.getMessage(), e);
             return "[Unexpected error reading stream: " + e.getMessage() + "]";
         }

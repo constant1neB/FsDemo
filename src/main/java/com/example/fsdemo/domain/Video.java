@@ -10,19 +10,16 @@ import java.time.Instant;
 @Table(name = "videos", // Explicit table name is good practice
         indexes = {
                 @Index(name = "idx_video_owner", columnList = "user_id"),
-                // Index on storagePath might still be useful, even if it's opaque
                 @Index(name = "idx_video_storage_path", columnList = "storagePath", unique = true),
                 @Index(name = "idx_video_processed_path", columnList = "processedStoragePath", unique = true)
-                // Add index on the generated filename if we query by it often (probably not needed initially)
-                // @Index(name = "idx_video_generated_filename", columnList = "generatedFilename")
         })
 public class Video {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY) // Use IDENTITY for auto-increment PKs
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY) // LAZY is good practice for performance
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false, foreignKey = @ForeignKey(name = "fk_video_owner"))
     private AppUser owner;
 
@@ -37,7 +34,7 @@ public class Video {
     private String description;
 
     @Column(nullable = false)
-    private Instant uploadDate; // Use Instant for timestamp
+    private Instant uploadDate;
 
     // Path where the file is actually stored (can be just the generatedFilename or a longer path)
     @Column(nullable = false, unique = true, length = 512) // Increased length for flexibility
@@ -48,20 +45,17 @@ public class Video {
     private String processedStoragePath;
 
     @Column(nullable = false)
-    private boolean isPublic = false; // Default to private
-
-    @Column(nullable = false)
     private Long fileSize; // Store file size in bytes
 
     @Column(length = 50) // e.g., "video/mp4"
-    private String mimeType; // Store the validated mime type
+    private String mimeType;
 
     @Column // Nullable until processed
     private Double duration; // Duration in seconds, to be set after processing
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20) // Define length for enum string
-    private VideoStatus status = VideoStatus.UPLOADED; // Default status after upload
+    @Column(nullable = false, length = 20)
+    private VideoStatus status = VideoStatus.UPLOADED;
 
     public enum VideoStatus {
         UPLOADED, // Initial state after successful upload and metadata save
@@ -70,7 +64,6 @@ public class Video {
         FAILED // Processing failed
     }
 
-    // Default constructor required by JPA
     public Video() {
     }
 
@@ -102,7 +95,6 @@ public class Video {
         this.owner = owner;
     }
 
-    // Renamed getter
     public String getGeneratedFilename() {
         return generatedFilename;
     }
@@ -141,14 +133,6 @@ public class Video {
 
     public void setProcessedStoragePath(String processedStoragePath) {
         this.processedStoragePath = processedStoragePath;
-    }
-
-    public boolean isPublic() {
-        return isPublic;
-    }
-
-    public void setPublic(boolean aPublic) {
-        isPublic = aPublic;
     }
 
     public Long getFileSize() {
