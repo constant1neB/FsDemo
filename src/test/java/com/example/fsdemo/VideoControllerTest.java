@@ -78,7 +78,7 @@ class VideoControllerTest {
 
     // Test constants
     private static final String TEST_USERNAME = "testuploader";
-    private static final String TEST_PASSWORD = "testpass";
+    private static final String TEST_PASSWORD = "testpass12345";
     private static final String TEST_EMAIL = "uploader@example.com";
     private static final String SAMPLE_FILENAME = "sample.mp4"; // Original filename for test file creation
     private static final String VIDEO_MIME_TYPE = "video/mp4";
@@ -390,7 +390,6 @@ class VideoControllerTest {
         anotherOwner.setId(99L);
         Video video = new Video(anotherOwner, "private.mp4", "Private", Instant.now(), "path/private", 100L, VIDEO_MIME_TYPE);
         video.setId(videoId);
-        video.setPublic(false);
 
         given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
         given(videoSecurityService.canView(videoId, TEST_USERNAME)).willReturn(false);

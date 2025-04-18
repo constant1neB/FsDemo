@@ -21,7 +21,6 @@ public class AppUser {
     private String username;
 
     @NotBlank(message = "Password cannot be blank")
-    @Size(min = 12, max = 70, message = "Password size must be between 12 and 70 characters")
     @Column(nullable = false)
     private String password;
 
