@@ -62,7 +62,10 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(AccessDeniedException.class)
     public ProblemDetail handleAccessDeniedException(AccessDeniedException ex, WebRequest request) {
-        log.warn("Access Denied for request {}: {}", request.getDescription(false), ex.getMessage());
+        if (log.isWarnEnabled()) {
+            log.warn("Access Denied for request {}: {}",
+                    request.getDescription(false), ex.getMessage());
+        }
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
                 HttpStatus.FORBIDDEN,
                 "Access Denied. You do not have sufficient permissions to access this resource."
@@ -75,7 +78,10 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(AuthenticationException.class)
     public ProblemDetail handleAuthenticationException(AuthenticationException ex, WebRequest request) {
-        log.warn("Authentication failure for request {}: {}", request.getDescription(false), ex.getMessage());
+        if (log.isWarnEnabled()) {
+            log.warn("Authentication failure for request {}: {}",
+                    request.getDescription(false), ex.getMessage());
+        }
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
                 HttpStatus.UNAUTHORIZED,
                 "Authentication failed. Please check your credentials or log in."
@@ -90,7 +96,10 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(ConstraintViolationException.class)
     public ProblemDetail handleConstraintViolationException(ConstraintViolationException ex, WebRequest request) {
-        log.warn("Constraint violation for request {}: {}", request.getDescription(false), ex.getMessage());
+        if (log.isWarnEnabled()) {
+            log.warn("Constraint violation for request {}: {}",
+                    request.getDescription(false), ex.getMessage());
+        }
 
         Map<String, String> errors = ex.getConstraintViolations().stream()
                 .collect(Collectors.toMap(
@@ -116,11 +125,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             @NonNull HttpHeaders headers,
             @NonNull HttpStatusCode status,
             @NonNull WebRequest request) {
-        log.warn("Method argument validation failed for request {}: {}", request.getDescription(false), ex.getMessage());
-
+        if (log.isWarnEnabled()) {
+            log.warn("Method argument validation failed for request {}: {}",
+                    request.getDescription(false), ex.getMessage());
+        }
         Map<String, String> errors = new HashMap<>();
-        ex.getBindingResult().getAllErrors().forEach((error) -> {
-            String fieldName = (error instanceof FieldError) ? ((FieldError) error).getField() : error.getObjectName();
+        ex.getBindingResult().getAllErrors().forEach(error -> {
+            String fieldName = error instanceof FieldError fieldError ? fieldError.getField() : error.getObjectName();
             String errorMessage = error.getDefaultMessage();
             errors.put(fieldName, errorMessage);
         });
@@ -141,8 +152,10 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             @NonNull HttpHeaders headers,
             @NonNull HttpStatusCode status,
             @NonNull WebRequest request) {
-        log.warn("HTTP method not supported for {}: {}", request.getDescription(false), ex.getMessage());
-
+        if (log.isWarnEnabled()) {
+            log.warn("HTTP method not supported for {}: {}",
+                    request.getDescription(false), ex.getMessage());
+        }
         ProblemDetail problemDetail = ProblemDetail.forStatus(status);
         problemDetail.setTitle("Method Not Allowed");
         problemDetail.setDetail(ex.getMessage());
@@ -157,7 +170,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                         .collect(Collectors.toSet());
                 headers.setAllow(allowedMethods);
             } catch (IllegalArgumentException illegalArgEx) {
-                log.error("Could not parse supported HTTP methods provided by exception: {}", Arrays.toString(supportedMethodsArray), illegalArgEx);
+                log.error("Could not parse supported HTTP methods provided by exception: {}",
+                        Arrays.toString(supportedMethodsArray), illegalArgEx);
             }
         }
         return new ResponseEntity<>(problemDetail, headers, status);
@@ -169,8 +183,10 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             @NonNull HttpHeaders headers,
             @NonNull HttpStatusCode status,
             @NonNull WebRequest request) {
-        log.warn("HTTP media type not supported for {}: {}", request.getDescription(false), ex.getMessage());
-
+        if (log.isWarnEnabled()) {
+            log.warn("HTTP media type not supported for {}: {}",
+                    request.getDescription(false), ex.getMessage());
+        }
         ProblemDetail problemDetail = ProblemDetail.forStatus(status);
         problemDetail.setTitle("Unsupported Media Type");
         problemDetail.setDetail(ex.getMessage());
@@ -190,8 +206,10 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             @NonNull HttpHeaders headers,
             @NonNull HttpStatusCode status,
             @NonNull WebRequest request) {
-        log.warn("Missing request parameter for {}: {}", request.getDescription(false), ex.getMessage());
-
+        if (log.isWarnEnabled()) {
+            log.warn("Missing request parameter for {}: {}",
+                    request.getDescription(false), ex.getMessage());
+        }
         ProblemDetail problemDetail = ProblemDetail.forStatus(status);
         problemDetail.setTitle("Missing Request Parameter");
         problemDetail.setDetail(ex.getMessage());
@@ -202,11 +220,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(ResponseStatusException.class)
     public ProblemDetail handleResponseStatusException(ResponseStatusException ex, WebRequest request) {
-        log.info("Handling ResponseStatusException for {}: Status={}, Reason={}",
-                request.getDescription(false), ex.getStatusCode(), ex.getReason());
-
+        if (log.isInfoEnabled()) {
+            log.info("Handling ResponseStatusException for {}: Status={}, Reason={}",
+                    request.getDescription(false), ex.getStatusCode(), ex.getReason());
+        }
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(ex.getStatusCode(), ex.getReason());
-        problemDetail.setTitle(ex.getStatusCode().isError() ? "Request Error" : "Request Information"); // Generic title based on status code
+        problemDetail.setTitle(ex.getStatusCode().isError() ? "Request Error" : "Request Information");
         problemDetail.setInstance(URI.create(request.getDescription(false)));
         problemDetail.setProperty(TIMESTAMP_PROPERTY, Instant.now());
         return problemDetail;
@@ -217,8 +236,10 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleGenericException(Exception ex, WebRequest request) {
         // Log ALL unhandled exceptions with full stack trace for internal debugging
-        log.error("Unhandled exception caught by @ExceptionHandler(Exception.class) for request {}:", request.getDescription(false), ex);
-
+        if (log.isErrorEnabled()) {
+            log.error("Unhandled exception caught by @ExceptionHandler(Exception.class) for request {}:",
+                    request.getDescription(false), ex);
+        }
         // Return a generic, non-revealing error message to the client
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
                 HttpStatus.INTERNAL_SERVER_ERROR,
@@ -255,7 +276,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
         if (body instanceof ProblemDetail pdBody) {
             problemDetailToReturn = pdBody;
-            if (problemDetailToReturn.getProperties() == null || !problemDetailToReturn.getProperties().containsKey(TIMESTAMP_PROPERTY)) {
+            Map<String, Object> properties = problemDetailToReturn.getProperties();
+            if (properties == null || !properties.containsKey(TIMESTAMP_PROPERTY)) {
                 problemDetailToReturn.setProperty(TIMESTAMP_PROPERTY, Instant.now());
             }
             if (problemDetailToReturn.getInstance() == null) {
@@ -263,7 +285,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             }
         } else {
             // Create a new basic ProblemDetail
-            log.warn("Creating basic ProblemDetail in handleExceptionInternal for exception type {}: {}", ex.getClass().getSimpleName(), ex.getMessage());
+            log.warn("Creating basic ProblemDetail in handleExceptionInternal for exception type {}: {}",
+                    ex.getClass().getSimpleName(), ex.getMessage());
             problemDetailToReturn = ProblemDetail.forStatus(statusCode);
             problemDetailToReturn.setTitle(statusCode.isError() ? "Request Error" : "Request Information");
             String detail = (ex.getCause() != null) ? ex.getCause().getMessage() : ex.getMessage();

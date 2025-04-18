@@ -30,10 +30,10 @@ public class Video {
     @Column(nullable = false, length = 50) // UUID (36 chars) + .mp4 (4 chars) = 40. 50 gives buffer.
     private String generatedFilename;
 
-    @Pattern(regexp = "^[\\p{L}0-9.,!?'\"_;:() \\r\\n-]*$",
-            message = "Description contains invalid characters. Only letters, numbers, whitespace (including newlines), and basic punctuation (. , ! ? ' \" - _ ; : ( )) are allowed.")
+    @Pattern(regexp = "^[\\p{L}0-9.,!?_;:() \\r\\n-]*$",
+            message = "Description contains invalid characters. Only letters, numbers, whitespace (including newlines), and basic punctuation (. , ! ? - _ ; : ( )) are allowed.")
     @Size(max = 255, message = "Description cannot exceed 255 characters")
-    @Column(length = 255)
+    @Column()
     private String description;
 
     @Column(nullable = false)
@@ -44,7 +44,7 @@ public class Video {
     private String storagePath;
 
     // Path where the LATEST PROCESSED file is stored (nullable if not processed yet or failed)
-    @Column(unique = true, length = 512, nullable = true) // Nullable, unique path for processed file
+    @Column(unique = true, length = 512) // Nullable, unique path for processed file
     private String processedStoragePath;
 
     @Column(nullable = false)

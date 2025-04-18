@@ -8,7 +8,7 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class OpenApiConfig {
     @Bean
-    public OpenAPI FsDemoOpenAPI() {
+    public OpenAPI fsDemoOpenAPI() {
         return new OpenAPI()
                 .info(new Info()
                         .title("FsDemo REST API")

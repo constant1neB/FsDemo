@@ -8,8 +8,6 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 
 public interface VideoRepository extends CrudRepository<Video, Long> {
-    @Override
-    List<Video> findAll(); // Keep this if needed elsewhere
 
     /**
      * Finds all videos owned by a specific user based on their username.

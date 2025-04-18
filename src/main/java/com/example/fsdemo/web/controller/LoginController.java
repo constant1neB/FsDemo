@@ -31,7 +31,7 @@ public class LoginController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody AccountCredentials creds) {
+    public ResponseEntity<Object> login(@RequestBody AccountCredentials creds) {
 
         // 1. Authenticate user credentials
         var credentials = new UsernamePasswordAuthenticationToken(creds.username(), creds.password());

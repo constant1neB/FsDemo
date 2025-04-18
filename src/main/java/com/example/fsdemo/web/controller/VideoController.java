@@ -34,7 +34,6 @@ import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.UUID;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/videos")
@@ -54,16 +53,15 @@ public class VideoController {
 
     private static final EnumSet<Video.VideoStatus> ALLOWED_START_PROCESSING_STATUSES =
             EnumSet.of(Video.VideoStatus.UPLOADED, Video.VideoStatus.READY);
-    // Define allowed file properties
+
     private static final String ALLOWED_EXTENSION = ".mp4";
     private static final String ALLOWED_CONTENT_TYPE = "video/mp4";
-    // MP4 Magic Bytes (common signatures)
-    // ftypisom (ISO Base Media file format)
+
     private static final byte[] MP4_MAGIC_BYTES_FTYP = new byte[]{0x66, 0x74, 0x79, 0x70};
-    // Other potential starting bytes for MP4 (like ftypmp42, ftypiso4, etc.) might exist,
-    // but checking for 'ftyp' at offset 4 is common. We'll check the first few bytes match.
-    private static final int MAGIC_BYTE_OFFSET = 4; // 'ftyp' typically starts at byte offset 4
-    private static final int MAGIC_BYTE_READ_LENGTH = 8; // Read enough bytes to check offset 4
+    private static final int MAGIC_BYTE_OFFSET = 4;
+    private static final int MAGIC_BYTE_READ_LENGTH = 8;
+
+    public static final String VIDEO_NOT_FOUND_MESSAGE = "Video not found";
 
     public VideoController(VideoStorageService storageService,
                            VideoRepository videoRepository,
@@ -144,7 +142,7 @@ public class VideoController {
             log.error("IOException during magic byte check for user {}: {}", username, e.getMessage(), e);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error reading file for validation.", e);
         }
-        // *** TODO: Add Antivirus Scan Hook here if integrating ***
+        // *** Add Antivirus Scan Hook here if integrating ***
 
         // 3. Generate Secure Filename (UUID) - AFTER validation passes
         String generatedFilename = UUID.randomUUID() + ALLOWED_EXTENSION;
@@ -211,7 +209,7 @@ public class VideoController {
                         video.getOwner().getUsername(),
                         video.getFileSize()
                 ))
-                .collect(Collectors.toList());
+                .toList();
 
         log.info("Returning {} videos for user: {}", responseDtos.size(), username);
 
@@ -228,7 +226,7 @@ public class VideoController {
         Video video = videoRepository.findById(id)
                 .orElseThrow(() -> {
                     log.warn("Get details failed: Video not found for ID: {}", id);
-                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Video not found");
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, VIDEO_NOT_FOUND_MESSAGE);
                 });
 
         // 2. Check Permissions using VideoSecurityService
@@ -265,7 +263,7 @@ public class VideoController {
         Video video = videoRepository.findById(id)
                 .orElseThrow(() -> {
                     log.warn("Processing failed: Video not found for ID: {}", id);
-                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Video not found");
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, VIDEO_NOT_FOUND_MESSAGE);
                 });
 
         // 2. Check Ownership
@@ -310,7 +308,7 @@ public class VideoController {
         Video video = videoRepository.findById(id)
                 .orElseThrow(() -> {
                     log.warn("Download failed: Video not found for ID: {}", id);
-                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Video not found");
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, VIDEO_NOT_FOUND_MESSAGE);
                 });
 
         // 2. Check Permissions
@@ -367,7 +365,7 @@ public class VideoController {
         Video video = videoRepository.findById(id)
                 .orElseThrow(() -> {
                     log.warn("Update failed: Video not found for ID: {}", id);
-                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Video not found");
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, VIDEO_NOT_FOUND_MESSAGE);
                 });
 
         // 2. Check Permissions (Ownership required for update)
@@ -408,7 +406,7 @@ public class VideoController {
         Video video = videoRepository.findById(id)
                 .orElseThrow(() -> {
                     log.warn("Delete failed: Video not found for ID: {}", id);
-                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Video not found");
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, VIDEO_NOT_FOUND_MESSAGE);
                 });
 
         // 2. Check Permissions (Deletion requires specific permission)
@@ -474,7 +472,7 @@ public class VideoController {
 
             // Compare with expected magic bytes
             boolean match = Arrays.equals(MP4_MAGIC_BYTES_FTYP, bytesToCheck);
-            if (!match) {
+            if (!match && log.isDebugEnabled()) {
                 log.debug("Magic byte mismatch. Expected: {}, Found: {}",
                         bytesToHex(MP4_MAGIC_BYTES_FTYP), bytesToHex(bytesToCheck));
             }

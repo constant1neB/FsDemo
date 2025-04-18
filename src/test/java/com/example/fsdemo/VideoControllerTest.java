@@ -111,13 +111,8 @@ class VideoControllerTest {
     private Cookie fingerprintCookie;
     private byte[] sampleVideoContent;
 
-    // No need for TestConfig if all mocks are handled by @MockitoBean
-    // @TestConfiguration
-    // static class TestConfig { ... }
-
     @BeforeEach
     void setUp() throws Exception {
-        // --- Reset mocks before each test ---
         Mockito.reset(storageService, videoSecurityService, videoRepository, videoProcessingService, appUserRepository);
 
         // Create test user object
@@ -125,8 +120,6 @@ class VideoControllerTest {
 
         // --- Mock AppUserRepository interactions ---
         given(appUserRepository.findByUsername(TEST_USERNAME)).willReturn(Optional.of(testUser));
-        // Mock save if needed by other logic (e.g., if user creation happened in controller)
-        // given(appUserRepository.save(any(AppUser.class))).willReturn(testUser);
 
         // Load test video file content
         sampleVideoContent = loadSampleVideo();
@@ -134,7 +127,7 @@ class VideoControllerTest {
         // Configure default mock behavior for storage service's store method (can be overridden in tests)
         configureDefaultMockBehavior();
 
-        // Obtain JWT token by authenticating (requires mocked AppUserRepository)
+        // Obtain JWT token by authenticating (requires AppUserRepository to be mocked)
         authenticateAndGetTokenAndCookie();
     }
 
@@ -614,8 +607,6 @@ class VideoControllerTest {
                 // Optionally check the error message if Bean Validation sends details
                 .andExpect(result -> {
                     String responseContent = result.getResponse().getContentAsString();
-                    // This check depends on how your exception handler formats validation errors
-                    // Assertions.assertThat(responseContent).contains("Description cannot exceed 255 characters");
                     System.out.println("Validation error response: " + responseContent); // Log for debugging
                 });
 
@@ -766,7 +757,7 @@ class VideoControllerTest {
         assertThat(videoCaptor.getValue().getStatus()).isEqualTo(VideoStatus.PROCESSING);
         assertThat(videoCaptor.getValue().getProcessedStoragePath()).isNull();
 
-        verify(videoProcessingService).processVideoEdits(eq(videoId), eq(validOptions), eq(testUser.getUsername()));
+        verify(videoProcessingService).processVideoEdits(videoId, validOptions, testUser.getUsername());
     }
 
     @Test
@@ -794,7 +785,7 @@ class VideoControllerTest {
         ArgumentCaptor<Video> videoCaptor = ArgumentCaptor.forClass(Video.class);
         verify(videoRepository).save(videoCaptor.capture());
         assertThat(videoCaptor.getValue().getStatus()).isEqualTo(VideoStatus.PROCESSING);
-        verify(videoProcessingService).processVideoEdits(eq(videoId), eq(validOptions), eq(testUser.getUsername()));
+        verify(videoProcessingService).processVideoEdits(videoId, validOptions, testUser.getUsername());
     }
 
     @Test
