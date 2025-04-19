@@ -119,15 +119,11 @@ public class FsDemoApplication implements CommandLineRunner {
     private AppUser findOrCreateUser(String username, String rawPassword) {
         return userRepository.findByUsername(username).orElseGet(() -> {
             logger.info("User '{}' not found, creating...", username);
-            try {
-                String hashedPassword = argon2Encoder.encode(rawPassword);
-                AppUser newUser = new AppUser(username, hashedPassword, FsDemoApplication.USER_ROLE, username + FsDemoApplication.EMAIL_SUFFIX);
-                AppUser savedUser = userRepository.save(newUser);
-                logger.info("Created test user '{}'", username);
-                return savedUser;
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to create user: " + username, e);
-            }
+            String hashedPassword = argon2Encoder.encode(rawPassword);
+            AppUser newUser = new AppUser(username, hashedPassword, FsDemoApplication.USER_ROLE, username + FsDemoApplication.EMAIL_SUFFIX);
+            AppUser savedUser = userRepository.save(newUser);
+            logger.info("Created test user '{}'", username);
+            return savedUser;
         });
     }
 }

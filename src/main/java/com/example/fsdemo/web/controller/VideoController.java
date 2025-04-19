@@ -164,9 +164,8 @@ public class VideoController {
         );
         video.setStatus(Video.VideoStatus.UPLOADED); // Set initial status
 
-        log.debug("Attempting to save video metadata: Owner={}, Desc={}, Size={}, MimeType={}",
+        log.debug("Attempting to save video metadata: Owner={}, Size={}, MimeType={}",
                 video.getOwner().getUsername(),
-                video.getDescription(),
                 video.getFileSize(),
                 video.getMimeType());
 
