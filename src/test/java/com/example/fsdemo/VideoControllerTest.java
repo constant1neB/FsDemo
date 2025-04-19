@@ -205,7 +205,6 @@ class VideoControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.id").value(1L)) // Check the assigned ID
-                .andExpect(jsonPath("$.generatedFilename").value(filenameCaptor.getValue())) // Check generated filename in response
                 .andExpect(jsonPath("$.description").value(description))
                 .andExpect(jsonPath("$.ownerUsername").value(TEST_USERNAME))
                 .andExpect(jsonPath("$.fileSize").value(sampleVideoContent.length));
@@ -492,7 +491,6 @@ class VideoControllerTest {
         mockMvc.perform(addAuth(get("/api/videos/{id}", videoId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(videoId))
-                .andExpect(jsonPath("$.generatedFilename").value(generatedFilename))
                 .andExpect(jsonPath("$.description").value("Details"))
                 .andExpect(jsonPath("$.ownerUsername").value(TEST_USERNAME))
                 .andExpect(jsonPath("$.fileSize").value(123L));

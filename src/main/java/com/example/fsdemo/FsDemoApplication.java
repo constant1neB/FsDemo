@@ -126,7 +126,6 @@ public class FsDemoApplication implements CommandLineRunner {
                 logger.info("Created test user '{}'", username);
                 return savedUser;
             } catch (Exception e) {
-                logger.error("Failed to create user '{}'", username, e);
                 throw new RuntimeException("Failed to create user: " + username, e);
             }
         });

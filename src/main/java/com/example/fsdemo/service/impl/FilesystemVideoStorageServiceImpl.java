@@ -27,7 +27,6 @@ public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
             Files.createDirectories(rootLocation);
             log.info("Video storage directory initialized at: {}", this.rootLocation); // Add log
         } catch (IOException e) {
-            log.error("Could not initialize storage directory: {}", this.rootLocation, e); // Improve log
             throw new VideoStorageException("Could not initialize storage directory: " + this.rootLocation, e);
         }
     }
@@ -65,8 +64,7 @@ public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
             log.info("Successfully stored file {} for user {}", generatedFilename, userId); // Log success
             return generatedFilename; // Assuming storagePath is just the filename for simplicity here
 
-        } catch (IOException e) {
-            log.error("Failed to store file {}: {}", generatedFilename, e.getMessage(), e); // Log error details
+        } catch (IOException e) {// Log error details
             throw new VideoStorageException("Failed to store file " + generatedFilename, e);
         }
     }
@@ -92,14 +90,11 @@ public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
                 throw new VideoStorageException("Could not read file: " + storagePath);
             }
         } catch (MalformedURLException e) {
-            log.error("Malformed URL exception for path: {}", storagePath, e);
             throw new VideoStorageException("Could not read file (Malformed URL): " + storagePath, e);
         } catch (VideoStorageException e) {
             // Re-throw security exceptions directly
             throw e;
         } catch (Exception e) {
-            // Catch unexpected errors during path resolution/resource creation
-            log.error("Unexpected error loading file from path: {}", storagePath, e);
             throw new VideoStorageException("Unexpected error loading file: " + storagePath, e);
         }
     }
@@ -125,14 +120,11 @@ public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
                 // For now, let's not throw an error if it's already gone.
             }
         } catch (IOException e) {
-            log.error("Failed to delete file {}: {}", storagePath, e.getMessage(), e);
             throw new VideoStorageException("Failed to delete file: " + storagePath, e);
         } catch (VideoStorageException e) {
             // Re-throw security exceptions directly
             throw e;
         } catch (Exception e) {
-            // Catch unexpected errors during path resolution/deletion
-            log.error("Unexpected error deleting file at path: {}", storagePath, e);
             throw new VideoStorageException("Unexpected error deleting file: " + storagePath, e);
         }
     }
