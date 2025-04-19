@@ -64,7 +64,6 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             log.info("Temporary video storage directory initialized at: {}", this.temporaryStorageLocation);
             log.info("Using ffmpeg executable at: {}", this.ffmpegExecutablePath);
         } catch (IOException e) {
-            log.error("Could not initialize processed or temporary storage directory", e);
             throw new VideoStorageException("Could not initialize storage directories", e);
         }
     }
@@ -211,16 +210,10 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             log.info("[Async] FFmpeg subprocess finished successfully for video ID: {}", videoId);
 
         } catch (IOException | InterruptedException | TimeoutException e) {
-            // Catch and re-throw the specific declared checked exceptions
-            log.error("[Async] Error executing or waiting for FFmpeg process for video ID {}: {}", videoId, e.getMessage());
             throw e;
         } catch (ExecutionException e) {
-            // Catch exceptions from Future.get()
-            log.error("[Async] Error getting stream output for video ID {}: {}", videoId, e.getCause() != null ? e.getCause().getMessage() : e.getMessage(), e);
             throw new FfmpegProcessingException("Error reading FFmpeg stream output for video ID " + videoId, e);
         } catch (Exception e) {
-            // Catch other unexpected errors
-            log.error("[Async] Unexpected error during FFmpeg execution for video ID {}: {}", videoId, e.getMessage(), e);
             throw (RuntimeException) e;
         } finally {
             if (ffmpegProcess != null && ffmpegProcess.isAlive()) {

@@ -6,8 +6,6 @@ package com.example.fsdemo.web.dto;
  */
 public record VideoResponse(
         Long id,
-        // The server-generated filename (UUID-based), NOT the user's original filename.
-        String generatedFilename,
         String description,
         String ownerUsername,
         Long fileSize
