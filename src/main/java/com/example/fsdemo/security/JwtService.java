@@ -42,7 +42,16 @@ public class JwtService {
             @Value("${jwt.expiration.ms:3600000}") long expirationTime, // Default 1 hour
             @Value("${jwt.issuer}") String issuer) {
         byte[] decodedKey = Base64.getDecoder().decode(secret);
+        if (decodedKey.length < 32) {
+            throw new IllegalArgumentException("Secret key must be at least 256 bits (32 bytes)");
+        }
         this.key = Keys.hmacShaKeyFor(decodedKey);
+        if (issuer == null || issuer.trim().isEmpty()) {
+            throw new IllegalArgumentException("Issuer must not be null or empty");
+        }
+        if (expirationTime <= 0) {
+            throw new IllegalArgumentException("Expiration time must be positive");
+        }
         this.expirationTime = expirationTime;
         this.issuer = issuer;
         log.info("JWT Service Initialized. Issuer: {}, Expiration: {}ms", issuer, expirationTime);
@@ -56,13 +65,19 @@ public class JwtService {
      * @return The generated JWT string.
      */
     public String generateToken(String username, String userFingerprintHash) {
+        if (username == null || username.trim().isEmpty()) {
+            throw new IllegalArgumentException("Username must not be null or empty");
+        }
+        if (userFingerprintHash == null || userFingerprintHash.trim().isEmpty()) {
+            throw new IllegalArgumentException("Fingerprint hash must not be null or empty");
+        }
         Instant now = Instant.now();
         Instant expirationInstant = now.plus(Duration.ofMillis(expirationTime));
 
         String token = Jwts.builder()
                 .subject(username)
                 .issuer(issuer)
-                .claim(FINGERPRINT_CLAIM, userFingerprintHash) // Add fingerprint hash claim
+                .claim(FINGERPRINT_CLAIM, userFingerprintHash)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expirationInstant))
                 .signWith(key)
@@ -83,7 +98,7 @@ public class JwtService {
 
         if (tokenOpt.isEmpty() || fingerprintOpt.isEmpty()) {
             log.debug("JWT or Fingerprint cookie missing.");
-            return null; // Token or cookie missing
+            return null;
         }
 
         String token = tokenOpt.get();
@@ -102,23 +117,19 @@ public class JwtService {
             // 2. Extract fingerprint hash from JWT claims
             String fingerprintHashFromToken = claims.get(FINGERPRINT_CLAIM, String.class);
             if (fingerprintHashFromToken == null || fingerprintHashFromToken.isBlank()) {
-                log.warn("Fingerprint hash missing from JWT claims for token: {}", token);
-                return null; // Fingerprint hash claim missing
+                log.warn("Fingerprint hash missing from JWT claims.");
+                return null;
             }
 
             // 3. Hash the fingerprint from the cookie
             String calculatedFingerprintHash = hashFingerprint(userFingerprintFromCookie);
-            if (calculatedFingerprintHash == null) {
-                // Error during hashing
-                return null;
-            }
 
             // 4. Compare the hash from the token with the calculated hash from the cookie
             if (!MessageDigest.isEqual(
                     fingerprintHashFromToken.getBytes(StandardCharsets.UTF_8),
                     calculatedFingerprintHash.getBytes(StandardCharsets.UTF_8))) {
-                log.warn("Fingerprint mismatch. Token hash: {}, Cookie hash: {}", fingerprintHashFromToken, calculatedFingerprintHash);
-                return null; // Fingerprint mismatch!
+                log.warn("Fingerprint mismatch.");
+                return null;
             }
 
             // 5. Both JWT and fingerprint are valid
@@ -175,7 +186,6 @@ public class JwtService {
             byte[] userFingerprintDigest = digest.digest(fingerprint.getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(userFingerprintDigest);
         } catch (NoSuchAlgorithmException e) {
-            // SHA-256 should always be available, so this is a critical error.
             throw new IllegalStateException("SHA-256 Algorithm not found!", e);
         }
     }

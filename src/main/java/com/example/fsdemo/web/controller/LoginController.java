@@ -41,9 +41,9 @@ public class LoginController {
         log.info("Authentication successful for user: {}", username);
 
         // 2. Generate Fingerprint
-        byte[] randomFgp = new byte[50]; // Generate 50 random bytes
+        byte[] randomFgp = new byte[50];
         secureRandom.nextBytes(randomFgp);
-        String userFingerprint = HexFormat.of().formatHex(randomFgp); // Use HexFormat
+        String userFingerprint = HexFormat.of().formatHex(randomFgp);
 
         // 3. Hash the Fingerprint for JWT claim
         String userFingerprintHash = JwtService.hashFingerprint(userFingerprint);
@@ -57,14 +57,13 @@ public class LoginController {
         String jwts = jwtService.generateToken(username, userFingerprintHash);
 
         // 5. Create Hardened Fingerprint Cookie using ResponseCookie builder
-        // If and when introducing Max-Age, it must be less than or equal to JWT expiration.
-        // Set it to JWT expiration for simplicity, or slightly less.
+        // If and when introducing Max-Age, it must be less than or equal to JWT expiration time.
 
         ResponseCookie fingerprintCookie = ResponseCookie.from(JwtService.FINGERPRINT_COOKIE_NAME, userFingerprint)
                 .httpOnly(true)     // Prevent access via JavaScript
                 .secure(true)       // Only send over HTTPS
                 .sameSite("Strict") // Prevent CSRF by not sending cookie on cross-site requests
-                .path("/")          // Make cookie available for all paths
+                .path("/api")       // Narrow the cookie scope to prevent unneeded exposure
                 .build();
         log.debug("Setting fingerprint cookie for user: {}", username);
 
