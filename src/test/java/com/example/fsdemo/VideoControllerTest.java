@@ -699,26 +699,36 @@ class VideoControllerTest {
     }
 
     @Test
-    void deleteVideo_whenStorageDeleteFails_shouldReturnInternalServerErrorAndNotDeleteFromDb() throws Exception {
+    void deleteVideo_whenStorageDeleteFails_shouldReturnNoContentAndLogWarning() throws Exception {
+        // Arrange
         Long videoId = 1L;
         String storagePath = "path/to/fail/delete.mp4";
+        String processedPath = "processed/path/fail.mp4";
         Video videoToDelete = new Video(testUser, "fail-delete-uuid.mp4", "Fail Delete", Instant.now(), storagePath, 100L, VIDEO_MIME_TYPE);
         videoToDelete.setId(videoId);
+        videoToDelete.setProcessedStoragePath(processedPath); // Set a processed path
 
         given(videoRepository.findById(videoId)).willReturn(Optional.of(videoToDelete));
         given(videoSecurityService.canDelete(videoId, TEST_USERNAME)).willReturn(true);
-        // Mock storageService.delete to throw exception
-        doThrow(new VideoStorageException("Disk I/O error during delete"))
-                .when(storageService).delete(storagePath);
 
+        // Mock storageService.delete to throw exception for BOTH paths
+        VideoStorageException storageException = new VideoStorageException("Disk I/O error during delete");
+        doThrow(storageException).when(storageService).delete(storagePath);
+        doThrow(storageException).when(storageService).delete(processedPath);
+
+        // Mock DB delete to succeed (this happens first now)
+        doNothing().when(videoRepository).delete(videoToDelete);
+
+        // Act & Assert
         mockMvc.perform(addAuth(delete("/api/videos/{id}", videoId)))
-                .andExpect(status().isInternalServerError());
+                .andExpect(status().isNoContent()); // Expect 204 No Content
 
+        // Verify interactions
         verify(videoRepository).findById(videoId);
         verify(videoSecurityService).canDelete(videoId, TEST_USERNAME);
-        verify(storageService).delete(storagePath); // Storage delete was attempted
-        // Verify DB delete was NOT called due to exception and @Transactional rollback
-        verify(videoRepository, never()).delete(any(Video.class));
+        verify(videoRepository).delete(videoToDelete);       // <<< CHANGED: Verify DB delete WAS called
+        verify(storageService).delete(storagePath);      // Verify storage delete was attempted for original
+        verify(storageService).delete(processedPath);    // Verify storage delete was attempted for processed
     }
 
     // ============ PROCESSING ENDPOINT TESTS ============
