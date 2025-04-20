@@ -387,7 +387,7 @@ public class VideoController {
     }
 
     @DeleteMapping("/{id}")
-    @Transactional // Ensure atomicity (as much as possible with external storage)
+    @Transactional
     public ResponseEntity<Void> deleteVideo(@PathVariable Long id, Authentication authentication) {
         String username = authentication.getName();
         log.debug("Delete video request received for ID: {} from user: {}", id, username);
@@ -399,36 +399,61 @@ public class VideoController {
                     return new ResponseStatusException(HttpStatus.NOT_FOUND, VIDEO_NOT_FOUND_MESSAGE);
                 });
 
-        // 2. Check Permissions (Deletion requires specific permission)
+        // 2. Check Permissions
         if (!videoSecurityService.canDelete(id, username)) {
             log.warn("Delete forbidden for user: {} on video ID: {}", username, id);
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have permission to delete this video");
         }
 
-        // 3. Delete from Storage Service FIRST
+        // 3. Get Storage Path BEFORE deleting DB record
         String storagePath = video.getStoragePath();
+        String processedStoragePath = video.getProcessedStoragePath(); // Also get processed path
+
         if (storagePath == null || storagePath.isBlank()) {
-            // This case shouldn't happen with current logic, but good to handle defensively
-            log.error("Delete failed: Video ID {} has missing or blank storage path.", id);
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Video metadata is inconsistent (missing storage path)");
+            log.error("Consistency issue: Video ID {} has missing or blank original storage path. Skipping file deletion.", id);
+            // Proceed to delete DB record anyway, as the file link is already broken/missing.
         }
 
-        log.trace("Attempting to delete video file for ID: {}", id);
+        // 4. Delete from Database FIRST
+        log.debug("Attempting to delete video metadata from database for ID: {}", id);
         try {
-            storageService.delete(storagePath); // Actually call the delete method
-            log.info("Successfully deleted video file for ID: {}", id);
-        } catch (VideoStorageException e) {
-            throw e;
+            videoRepository.delete(video);
+            log.info("Successfully deleted video metadata from database for ID: {}", id);
         } catch (Exception e) {
-            throw new VideoStorageException("Unexpected error during file deletion for video " + id, e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete video record", e);
         }
 
-        // 4. Delete from Database (only if storage deletion succeeded)
-        videoRepository.delete(video);
-        log.info("Successfully deleted video metadata from database for ID: {}", id);
+        // File Deletion (Outside DB Transaction)
+        // Attempt to delete the original file
+        deleteFileFromStorage(storagePath, id, "original");
 
-        // 5. Return No Content
-        return ResponseEntity.noContent().build(); // Standard for successful DELETE
+        // Attempt to delete the processed file (if it exists)
+        if (processedStoragePath != null && !processedStoragePath.isBlank()) {
+            deleteFileFromStorage(processedStoragePath, id, "processed");
+        }
+
+        // 5. Return No Content (even if file deletion had issues, the primary resource (DB record) is gone)
+        return ResponseEntity.noContent().build();
+    }
+
+    // Helper method for file deletion and logging
+    private void deleteFileFromStorage(String storagePath, Long videoId, String fileType) {
+        if (storagePath == null || storagePath.isBlank()) {
+            log.debug("No storage path found for video ID {}, skipping file deletion.", videoId);
+            return;
+        }
+
+        log.trace("Attempting to delete video file for ID: {}", videoId);
+        try {
+            storageService.delete(storagePath);
+            log.info("Successfully deleted {} video file for ID: {}", fileType, videoId);
+        } catch (VideoStorageException e) {
+            // Log as warning: DB record is gone, but file lingers. Needs cleanup.
+            log.warn("Failed to delete file from storage after DB record deletion. Orphaned file likely exists. VideoID: {}, Reason: {}", videoId, e.getMessage(), e);
+        } catch (Exception e) {
+            // Catch unexpected errors during deletion
+            log.warn("Unexpected error deleting file from storage after DB record deletion. Orphaned file likely exists. VideoID: {}, Reason: {}", videoId, e.getMessage(), e);
+        }
     }
 
     /**
