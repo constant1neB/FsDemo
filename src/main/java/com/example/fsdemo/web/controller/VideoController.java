@@ -1,20 +1,18 @@
 package com.example.fsdemo.web.controller;
 
 import com.example.fsdemo.domain.AppUser;
-import com.example.fsdemo.exceptions.VideoStorageException;
-import com.example.fsdemo.repository.AppUserRepository;
 import com.example.fsdemo.domain.Video;
+import com.example.fsdemo.exceptions.VideoStorageException;
+import com.example.fsdemo.exceptions.VideoValidationException;
+import com.example.fsdemo.repository.AppUserRepository;
 import com.example.fsdemo.repository.VideoRepository;
-import com.example.fsdemo.service.VideoProcessingService;
-import com.example.fsdemo.service.VideoStorageService;
-import com.example.fsdemo.service.VideoSecurityService;
+import com.example.fsdemo.service.*;
 import com.example.fsdemo.web.dto.EditOptions;
 import com.example.fsdemo.web.dto.UpdateVideoRequest;
 import com.example.fsdemo.web.dto.VideoResponse;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -22,18 +20,15 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.EnumSet;
-import java.util.UUID;
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/videos")
@@ -46,33 +41,28 @@ public class VideoController {
     private final AppUserRepository appUserRepository;
     private final VideoSecurityService videoSecurityService;
     private final VideoProcessingService videoProcessingService;
-
-
-    @Value("${video.upload.max-size-mb:40}")
-    private long maxFileSizeMb;
+    private final VideoUploadValidator videoUploadValidator;
 
     private static final EnumSet<Video.VideoStatus> ALLOWED_START_PROCESSING_STATUSES =
             EnumSet.of(Video.VideoStatus.UPLOADED, Video.VideoStatus.READY);
 
-    private static final String ALLOWED_EXTENSION = ".mp4";
-    private static final String ALLOWED_CONTENT_TYPE = "video/mp4";
-
-    private static final byte[] MP4_MAGIC_BYTES_FTYP = new byte[]{0x66, 0x74, 0x79, 0x70};
-    private static final int MAGIC_BYTE_OFFSET = 4;
-    private static final int MAGIC_BYTE_READ_LENGTH = 8;
-
     public static final String VIDEO_NOT_FOUND_MESSAGE = "Video not found";
+
+    private static final String MP4_EXTENSION = ".mp4";
+
 
     public VideoController(VideoStorageService storageService,
                            VideoRepository videoRepository,
                            AppUserRepository appUserRepository,
                            VideoSecurityService videoSecurityService,
-                           VideoProcessingService videoProcessingService) {
+                           VideoProcessingService videoProcessingService,
+                           VideoUploadValidator videoUploadValidator) {
         this.storageService = storageService;
         this.videoRepository = videoRepository;
         this.appUserRepository = appUserRepository;
         this.videoSecurityService = videoSecurityService;
         this.videoProcessingService = videoProcessingService;
+        this.videoUploadValidator = videoUploadValidator;
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -88,84 +78,47 @@ public class VideoController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
         log.info("Video upload request received from user: {}", username);
 
-        // 2. Initial File Checks (BEFORE generating UUID or calling storage)
-        if (file.isEmpty()) {
-            log.warn("Upload rejected for user {}: File is empty.", username);
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File cannot be empty");
-        }
-
-        // Size Check (using configured value)
-        long maxSizeBytes = maxFileSizeMb * 1024 * 1024;
-        if (file.getSize() > maxSizeBytes) {
-            log.warn("Upload rejected for user {}: File size {} exceeds limit of {}MB.", username, file.getSize(), maxFileSizeMb);
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "File size exceeds maximum limit of " + maxFileSizeMb + "MB");
-        }
-
-        // Original Filename Validation (for sanity check ONLY, not for storage)
-        String originalFilenameRaw = file.getOriginalFilename();
-        if (originalFilenameRaw == null || originalFilenameRaw.isBlank()) {
-            // While we don't use it, a blank original name might indicate issues.
-            log.warn("Upload rejected for user {}: Original file name is missing or blank.", username);
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Original file name is missing or blank.");
-        }
-        // Check for control characters or path traversal attempts in the original name
-        if (originalFilenameRaw.matches(".*\\p{Cntrl}.*") || originalFilenameRaw.contains("..") || originalFilenameRaw.contains("/") || originalFilenameRaw.contains("\\")) {
-            log.warn("Upload rejected for user {}: Invalid characters detected in original filename.", username);
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid characters in original filename.");
-        }
-        // Clean the path just in case
-        String sanitizedOriginalFilename = StringUtils.cleanPath(originalFilenameRaw);
-
-
-        // Extension Check (on sanitized original filename)
-        if (!sanitizedOriginalFilename.toLowerCase().endsWith(ALLOWED_EXTENSION)) {
-            log.warn("Upload rejected for user {}: Invalid file extension. Expected '{}'.", username, ALLOWED_EXTENSION);
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid file type. Only " + ALLOWED_EXTENSION + " files are allowed.");
-        }
-
-        // Content-Type Check
-        String contentType = file.getContentType();
-        if (!ALLOWED_CONTENT_TYPE.equalsIgnoreCase(contentType)) {
-            log.warn("Upload rejected for user {}: Invalid content type '{}'. Expected '{}'.", username, contentType, ALLOWED_CONTENT_TYPE);
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid content type detected. Expected " + ALLOWED_CONTENT_TYPE + ".");
-        }
-
-        // Magic Byte Check
+        // 2. Delegate Validation
         try {
-            if (!hasMp4MagicBytes(file)) {
-                log.warn("Upload rejected for user {}: File failed magic byte validation. (ContentType: {})", username, contentType);
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File content does not appear to be a valid MP4 video.");
-            }
-            log.debug("Magic byte validation passed for file from user {}", username);
-        } catch (IOException e) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error reading file for validation.", e);
+            videoUploadValidator.validate(file);
+        } catch (VideoValidationException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected error during file validation", e);
         }
-        // *** Add Antivirus Scan Hook here if integrating ***
+        // Validation Passed
 
-        // 3. Generate Secure Filename (UUID) - after validation passes
-        String generatedFilename = UUID.randomUUID() + ALLOWED_EXTENSION;
-        log.info("Validation passed. Generated secure filename for original file uploaded by user {}", username);
+        // 3. Generate Secure Filename (UUID)
+        String generatedFilename = UUID.randomUUID() + MP4_EXTENSION;
+        log.info("Validation passed. Generated secure filename {} for file uploaded by user {}", generatedFilename, username);
 
         // 4. Store the file using the GENERATED filename
-        log.debug("Calling storage service to store file for user {}", username);
-        String storagePath = storageService.store(file, owner.getId(), generatedFilename);
-        log.debug("File stored successfully for user {}", username);
-        // Let VideoStorageException or other RuntimeExceptions propagate
+        log.debug("Calling storage service to store file {} for user {}", generatedFilename, username);
+        String storagePath;
+        try {
+            storagePath = storageService.store(file, owner.getId(), generatedFilename);
+        } catch (VideoStorageException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to store video due to an unexpected error.", e);
+        }
 
-        // 5. Create Video Entity (Using generated filename, not original)
+
+        // 5. Create Video Entity
         Video video = new Video(
                 owner,
-                generatedFilename, // Use the generated UUID-based filename
-                description,       // User-provided description
-                Instant.now(),     // Upload timestamp
-                storagePath,       // Use the path returned by the storage service
-                file.getSize(),    // Store file size
-                contentType        // Store the validated content type
+                generatedFilename,
+                description,
+                Instant.now(),
+                storagePath,
+                file.getSize(),
+                file.getContentType()
         );
-        video.setStatus(Video.VideoStatus.UPLOADED); // Set initial status
+        video.setStatus(Video.VideoStatus.UPLOADED);
 
-        log.debug("Attempting to save video metadata: Owner={}, Size={}, MimeType={}",
+        log.debug("Attempting to save video metadata: Owner={}, GeneratedFilename={}, Size={}, MimeType={}",
                 video.getOwner().getUsername(),
+                video.getGeneratedFilename(),
                 video.getFileSize(),
                 video.getMimeType());
 
@@ -173,7 +126,7 @@ public class VideoController {
         Video savedVideo = videoRepository.save(video);
         log.info("Successfully saved video metadata for ID: {}", savedVideo.getId());
 
-        // 7. Create Response DTO (using the generated filename)
+        // 7. Create Response DTO
         VideoResponse responseDto = new VideoResponse(
                 savedVideo.getId(),
                 savedVideo.getDescription(),
@@ -224,7 +177,6 @@ public class VideoController {
         // 2. Check Permissions using VideoSecurityService
         if (!videoSecurityService.canView(id, username)) {
             log.warn("Get details forbidden for user: {} on video ID: {}", username, id);
-            // Return 403 Forbidden if user cannot view
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have permission to access this video's details");
         }
 
@@ -241,10 +193,10 @@ public class VideoController {
     }
 
     @PostMapping(value = "/{id}/process", consumes = MediaType.APPLICATION_JSON_VALUE)
-    @Transactional // Ensure status update is atomic with checks
+    @Transactional
     public ResponseEntity<Void> processVideo(
             @PathVariable Long id,
-            @RequestBody @Valid EditOptions options, // Receive JSON body with options
+            @RequestBody @Valid EditOptions options,
             Authentication authentication) {
 
         String username = authentication.getName();
@@ -267,15 +219,13 @@ public class VideoController {
         if (!ALLOWED_START_PROCESSING_STATUSES.contains(video.getStatus())) {
             log.warn("Processing conflict for user: {} on video ID: {}. Current status is '{}', requires UPLOADED or READY.",
                     username, id, video.getStatus());
-            // Use 409 Conflict if already processing or failed
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Video cannot be processed in its current state: " + video.getStatus());
         }
-        // NOTE: @Valid on EditOptions handles input validation based on annotations in EditOptions record
 
         // 4. Update Status and Clear Previous Processed Path
         log.debug("Updating status to PROCESSING for video ID: {}", id);
         video.setStatus(Video.VideoStatus.PROCESSING);
-        video.setProcessedStoragePath(null); // Clear any old processed path before starting new process
+        video.setProcessedStoragePath(null); // Clear any old path before starting new process
 
         // 5. Save Status Update
         videoRepository.save(video);
@@ -305,39 +255,57 @@ public class VideoController {
         // 2. Check Permissions
         if (!videoSecurityService.canView(id, username)) {
             log.warn("Download forbidden for user: {} on video ID: {}", username, id);
-            // Return 403 Forbidden if user cannot view (more specific than 404)
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have permission to access this video");
         }
 
-        // 3. Load Resource from Storage
-        log.debug("Loading video resource for ID: {}", id);
-        Resource resource = storageService.load(video.getStoragePath());
-        // Let VideoStorageException propagate
+        // 3. Determine which file to download: processed if READY, original otherwise
+        String pathTodownload;
+        if (video.getStatus() == Video.VideoStatus.READY && video.getProcessedStoragePath() != null && !video.getProcessedStoragePath().isBlank()) {
+            pathTodownload = video.getProcessedStoragePath();
+            log.debug("Preparing download for processed video. ID: {}, Path: {}", id, pathTodownload);
+        } else {
+            pathTodownload = video.getStoragePath(); // Original path
+            log.debug("Preparing download for original video. ID: {}, Status: {}, Path: {}", id, video.getStatus(), pathTodownload);
+        }
 
-        // Check if resource exists and is readable (basic check)
+        if (pathTodownload == null || pathTodownload.isBlank()) {
+            log.error("Download failed for video ID {}: Storage path is missing or blank. Status: {}", id, video.getStatus());
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Video file path is missing");
+        }
+
+        // 4. Load Resource from Storage using the determined path
+        log.debug("Loading video resource for ID: {} from path: {}", id, pathTodownload);
+        Resource resource;
+        try {
+            resource = storageService.load(pathTodownload);
+        } catch (VideoStorageException e) {
+            // Distinguish between file not found (could be 404 or 500 depending on cause) vs other storage errors
+            if (e.getMessage() != null && e.getMessage().contains("Could not read file")) {
+                // This implies the file expected based on DB record doesn't exist in storage
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Video file not found in storage", e);
+            }
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error retrieving video file", e);
+        }
+
         if (!resource.exists() || !resource.isReadable()) {
-            log.error("Download failed: Resource not found or not readable for video ID: {}", id);
+            log.error("Download failed for video ID {}: Resource loaded but not found or not readable at path: {}", id, pathTodownload);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error retrieving video file [exists/readable check failed]");
         }
 
-        // 4. Generate New UUID Filename for Download
-        // We don't want to expose the internal storage filename or the stored UUID.
-        String downloadFilename = UUID.randomUUID() + ALLOWED_EXTENSION;
-        log.info("Generated download filename for video ID: {}", id);
+        // 5. Generate New UUID Filename for Download (to hide internal structure)
+        String downloadFilename = UUID.randomUUID() + MP4_EXTENSION;
+        log.info("Generated download filename {} for video ID: {}", downloadFilename, id);
 
-        // 5. Build Response
+        // 6. Build Response
         ResponseEntity.BodyBuilder responseBuilder = ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(video.getMimeType()))
+                .contentType(MediaType.parseMediaType(video.getMimeType())) // Use MIME type from DB
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + downloadFilename + "\"");
         try {
-            // Attempt to set Content-Length
             responseBuilder.contentLength(resource.contentLength());
             log.debug("Successfully determined content length ({}) for video ID: {}", resource.contentLength(), id);
         } catch (IOException e) {
-            // Log the error but proceed without the Content-Length header
             log.warn("Could not determine content length for video ID: {}. Proceeding without Content-Length header. Error: {}",
                     id, e.getMessage());
-            // No need to re-throw or set error status here, just omit the header
         }
         return responseBuilder.body(resource);
     }
@@ -366,7 +334,6 @@ public class VideoController {
         }
 
         // 3. Update Description
-        // Handle null description in request gracefully (e.g., set to empty string or keep existing)
         String newDescription = request.description() != null ? request.description() : "";
         video.setDescription(newDescription);
         log.trace("Updating description for video ID: {}", id);
@@ -405,14 +372,9 @@ public class VideoController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have permission to delete this video");
         }
 
-        // 3. Get Storage Path BEFORE deleting DB record
-        String storagePath = video.getStoragePath();
-        String processedStoragePath = video.getProcessedStoragePath(); // Also get processed path
-
-        if (storagePath == null || storagePath.isBlank()) {
-            log.error("Consistency issue: Video ID {} has missing or blank original storage path. Skipping file deletion.", id);
-            // Proceed to delete DB record anyway, as the file link is already broken/missing.
-        }
+        // 3. Get Storage Paths BEFORE deleting DB record
+        String originalStoragePath = video.getStoragePath();
+        String processedStoragePath = video.getProcessedStoragePath();
 
         // 4. Delete from Database FIRST
         log.debug("Attempting to delete video metadata from database for ID: {}", id);
@@ -423,68 +385,32 @@ public class VideoController {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete video record", e);
         }
 
-        // File Deletion (Outside DB Transaction)
-        // Attempt to delete the original file
-        deleteFileFromStorage(storagePath, id, "original");
+        // 5. Delete Files from Storage (Outside DB Transaction)
+        deleteFileFromStorage(originalStoragePath, id, "original");
+        deleteFileFromStorage(processedStoragePath, id, "processed");
 
-        // Attempt to delete the processed file (if it exists)
-        if (processedStoragePath != null && !processedStoragePath.isBlank()) {
-            deleteFileFromStorage(processedStoragePath, id, "processed");
-        }
-
-        // 5. Return No Content (even if file deletion had issues, the primary resource (DB record) is gone)
+        // 6. Return No Content
+        log.info("Successfully processed delete request for video ID: {}", id);
         return ResponseEntity.noContent().build();
     }
 
     // Helper method for file deletion and logging
     private void deleteFileFromStorage(String storagePath, Long videoId, String fileType) {
         if (storagePath == null || storagePath.isBlank()) {
-            log.debug("No storage path found for video ID {}, skipping file deletion.", videoId);
+            log.debug("No {} storage path found for video ID {}, skipping file deletion.", fileType, videoId);
             return;
         }
 
-        log.trace("Attempting to delete video file for ID: {}", videoId);
+        log.debug("Attempting to delete {} video file for ID: {}", fileType, videoId);
         try {
             storageService.delete(storagePath);
             log.info("Successfully deleted {} video file for ID: {}", fileType, videoId);
         } catch (VideoStorageException e) {
-            // Log as warning: DB record is gone, but file lingers. Needs cleanup.
-            log.warn("Failed to delete file from storage after DB record deletion. Orphaned file likely exists. VideoID: {}, Reason: {}", videoId, e.getMessage(), e);
+            // Log as warning: DB record is gone, but file might linger. Needs monitoring/cleanup.
+            log.warn("Failed to delete {} file from storage after DB record deletion. Orphaned file likely exists. VideoID: {}, Reason: {}", fileType, videoId, e.getMessage(), e);
         } catch (Exception e) {
             // Catch unexpected errors during deletion
-            log.warn("Unexpected error deleting file from storage after DB record deletion. Orphaned file likely exists. VideoID: {}, Reason: {}", videoId, e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Checks if the provided MultipartFile starts with the expected MP4 magic bytes.
-     * Reads only the necessary starting bytes.
-     *
-     * @param file The MultipartFile to check.
-     * @return true if the magic bytes match, false otherwise.
-     * @throws IOException If an error occurs reading the file stream.
-     */
-    private boolean hasMp4MagicBytes(MultipartFile file) throws IOException {
-        // Use try-with-resources to ensure the InputStream is closed
-        try (InputStream inputStream = file.getInputStream()) {
-            byte[] initialBytes = new byte[MAGIC_BYTE_READ_LENGTH];
-            int bytesRead = inputStream.read(initialBytes, 0, MAGIC_BYTE_READ_LENGTH);
-
-            // Check if we could read enough bytes
-            if (bytesRead < MAGIC_BYTE_OFFSET + MP4_MAGIC_BYTES_FTYP.length) {
-                log.warn("Could not read enough bytes ({}) for magic byte check.", bytesRead);
-                return false; // File too small or read error
-            }
-
-            // Extract the bytes at the expected offset
-            byte[] bytesToCheck = Arrays.copyOfRange(initialBytes, MAGIC_BYTE_OFFSET, MAGIC_BYTE_OFFSET + MP4_MAGIC_BYTES_FTYP.length);
-
-            // Compare with expected magic bytes
-            boolean match = Arrays.equals(MP4_MAGIC_BYTES_FTYP, bytesToCheck);
-            if (!match && log.isDebugEnabled()) {
-                log.debug("Magic byte validation failed for file content.");
-            }
-            return match;
+            log.warn("Unexpected error deleting {} file from storage after DB record deletion. Orphaned file likely exists. VideoID: {}, Reason: {}", fileType, videoId, e.getMessage(), e);
         }
     }
 }
