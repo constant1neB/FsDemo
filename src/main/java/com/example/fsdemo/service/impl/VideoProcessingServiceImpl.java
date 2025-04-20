@@ -2,34 +2,34 @@ package com.example.fsdemo.service.impl;
 
 import com.example.fsdemo.domain.Video;
 import com.example.fsdemo.domain.Video.VideoStatus;
+import com.example.fsdemo.exceptions.FfmpegProcessingException;
+import com.example.fsdemo.exceptions.StreamOutputRetrievalException;
 import com.example.fsdemo.exceptions.VideoStorageException;
 import com.example.fsdemo.repository.VideoRepository;
 import com.example.fsdemo.service.VideoProcessingService;
 import com.example.fsdemo.service.VideoStorageService;
+import com.example.fsdemo.service.VideoStatusUpdater;
 import com.example.fsdemo.web.dto.EditOptions;
-import com.example.fsdemo.exceptions.FfmpegProcessingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.*;
-import java.util.stream.Collectors;
-
-import java.io.IOException;
+import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 @Service
 public class VideoProcessingServiceImpl implements VideoProcessingService {
@@ -37,25 +37,30 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
     private static final Logger log = LoggerFactory.getLogger(VideoProcessingServiceImpl.class);
 
     private final VideoRepository videoRepository;
-    private final VideoStorageService videoStorageService; // To load original
-
-
+    private final VideoStorageService videoStorageService;
+    private final VideoStatusUpdater videoStatusUpdater;
     private final Path processedStorageLocation;
     private final Path temporaryStorageLocation;
     private final String ffmpegExecutablePath;
-    private static final long FFMPEG_TIMEOUT_SECONDS = 120;
+    private final long ffmpegTimeoutSeconds;
 
+    @Autowired
     public VideoProcessingServiceImpl(
             VideoRepository videoRepository,
             VideoStorageService videoStorageService,
+            VideoStatusUpdater videoStatusUpdater,
             @Value("${video.storage.processed.path:./uploads/videos/processed}") String processedPath,
             @Value("${video.storage.temp.path:./uploads/videos/temp}") String tempPath,
-            @Value("${ffmpeg.path:ffmpeg}") String ffmpegPath) {
+            @Value("${ffmpeg.path:ffmpeg}") String ffmpegPath,
+            @Value("${ffmpeg.timeout.seconds:120}") long ffmpegTimeoutSeconds
+    ) {
         this.videoRepository = videoRepository;
         this.videoStorageService = videoStorageService;
+        this.videoStatusUpdater = videoStatusUpdater;
         this.processedStorageLocation = Paths.get(processedPath).toAbsolutePath().normalize();
         this.temporaryStorageLocation = Paths.get(tempPath).toAbsolutePath().normalize();
         this.ffmpegExecutablePath = ffmpegPath;
+        this.ffmpegTimeoutSeconds = ffmpegTimeoutSeconds;
 
         try {
             Files.createDirectories(this.processedStorageLocation);
@@ -63,6 +68,7 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             log.info("Processed video storage directory initialized at: {}", this.processedStorageLocation);
             log.info("Temporary video storage directory initialized at: {}", this.temporaryStorageLocation);
             log.info("Using ffmpeg executable at: {}", this.ffmpegExecutablePath);
+            log.info("FFmpeg process timeout set to {} seconds", this.ffmpegTimeoutSeconds);
         } catch (IOException e) {
             throw new VideoStorageException("Could not initialize storage directories", e);
         }
@@ -70,23 +76,20 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
 
     @Override
     @Async
-    // Run in a new transaction to manage status updates independently
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void processVideoEdits(Long videoId, EditOptions options, String username) {
-        log.info("[Async] Starting processing for video ID: {} by user: {}", videoId, username);
+        String txName = TransactionSynchronizationManager.getCurrentTransactionName();
+        log.info("[Async][TX:{}] Starting processing for video ID: {} by user: {}", txName, videoId, username);
 
-        // Find video (within this new transaction)
         Video video = videoRepository.findById(videoId)
                 .orElseThrow(() -> {
-                    // This shouldn't happen if controller logic is correct, but handle defensively
-                    log.error("[Async] Video not found for processing: {}", videoId);
+                    log.error("[Async][TX:{}] Video not found for processing: {}", txName, videoId);
                     return new IllegalStateException("Video not found for processing: " + videoId);
                 });
 
-        // Double-check status
         if (video.getStatus() != VideoStatus.PROCESSING) {
-            log.warn("[Async] Video {} is not in PROCESSING state (actual: {}). Aborting processing task.",
-                    videoId, video.getStatus());
+            log.warn("[Async][TX:{}] Video {} is not in PROCESSING state (actual: {}). Aborting processing task.",
+                    txName, videoId, video.getStatus());
             return;
         }
 
@@ -96,153 +99,197 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
         String finalProcessedFilename;
 
         try {
-            log.debug("[Async] Loading original resource from storage path: {}", video.getStoragePath());
+            log.debug("[Async][TX:{}] Loading original resource from storage path: {}", txName, video.getStoragePath());
             originalResource = videoStorageService.load(video.getStoragePath());
             if (!originalResource.exists() || !originalResource.isReadable()) {
                 throw new VideoStorageException("Original video resource not found or not readable: " + video.getStoragePath());
             }
 
             String tempInputFilename = "temp-in-" + UUID.randomUUID() + "-" + video.getGeneratedFilename();
-            tempInputPath = temporaryStorageLocation.resolve(tempInputFilename).normalize();
-            Files.copy(originalResource.getInputStream(), tempInputPath);
-            log.debug("[Async] Copied original video {} to temporary input: {}", videoId, tempInputPath);
+            tempInputPath = temporaryStorageLocation.resolve(tempInputFilename).normalize().toAbsolutePath();
+            if (!tempInputPath.startsWith(temporaryStorageLocation)) {
+                throw new VideoStorageException("Security Error: Invalid temporary input path generated: " + tempInputPath);
+            }
+            try (InputStream inputStream = originalResource.getInputStream()) {
+                Files.copy(inputStream, tempInputPath);
+            }
+            log.debug("[Async][TX:{}] Copied original video {} to temporary input: {}", txName, videoId, tempInputPath);
 
             String tempOutputFilename = "temp-out-" + UUID.randomUUID() + ".mp4";
-            tempOutputPath = temporaryStorageLocation.resolve(tempOutputFilename).normalize();
+            tempOutputPath = temporaryStorageLocation.resolve(tempOutputFilename).normalize().toAbsolutePath();
+            if (!tempOutputPath.startsWith(temporaryStorageLocation)) {
+                throw new VideoStorageException("Security Error: Invalid temporary output path generated: " + tempOutputPath);
+            }
 
-            // --- ======================= ---
-            // --- FFmpeg Execution Call   ---
-            // --- ======================= ---
-            log.info("[Async] Starting FFmpeg processing for video ID: {}", videoId);
-            log.info("[Async] Options: CutStart={}, CutEnd={}, Mute={}, Resolution={}",
-                    options.cutStartTime(), options.cutEndTime(), options.mute(), options.targetResolutionHeight());
-            log.info("[Async] Input Path (temp): {}", tempInputPath);
-            log.info("[Async] Output Path (temp): {}", tempOutputPath);
-
+            log.info("[Async][TX:{}] Starting FFmpeg processing for video ID: {}", txName, videoId);
             List<String> command = buildFfmpegCommand(tempInputPath, tempOutputPath, options);
             if (log.isDebugEnabled()) {
-                log.debug("[Async] FFmpeg command: {}", String.join(" ", command));
+                log.debug("[Async][TX:{}] FFmpeg command: {}", txName, String.join(" ", command));
             }
-            // Call the extracted method
             executeFfmpegProcess(command, videoId);
-
-            log.info("[Async] FFmpeg processing completed successfully for video ID: {}", videoId);
-            // --- ================================= ---
-            // ---         END FFmpeg Execution      ---
-            // --- ================================= ---
+            log.info("[Async][TX:{}] FFmpeg processing completed successfully for video ID: {}", txName, videoId);
 
             finalProcessedFilename = video.getId() + "-processed-" + UUID.randomUUID() + ".mp4";
-            Path finalProcessedPath = processedStorageLocation.resolve(finalProcessedFilename).normalize();
+            Path finalProcessedPath = processedStorageLocation.resolve(finalProcessedFilename).normalize().toAbsolutePath();
+            if (!finalProcessedPath.startsWith(processedStorageLocation)) {
+                throw new VideoStorageException("Security Error: Invalid final processed path generated: " + finalProcessedPath);
+            }
             Files.createDirectories(finalProcessedPath.getParent());
             Files.move(tempOutputPath, finalProcessedPath);
-            log.debug("[Async] Moved processed file from {} to {}", tempOutputPath, finalProcessedPath);
-
+            log.debug("[Async][TX:{}] Moved processed file from {} to {}", txName, tempOutputPath, finalProcessedPath);
 
             video.setStatus(VideoStatus.READY);
             video.setProcessedStoragePath(finalProcessedFilename);
-            videoRepository.save(video); // Save the updated 'video' object
-            log.info("[Async] Successfully processed video ID: {}. Status set to READY. Processed path: {}",
-                    videoId, finalProcessedFilename);
+            videoRepository.save(video);
+            log.info("[Async][TX:{}] Successfully processed video ID: {}. Status set to READY. Processed path: {}",
+                    txName, videoId, finalProcessedFilename);
 
         } catch (InterruptedException e) {
-            log.warn("[Async] Processing interrupted for video ID: {}", videoId, e);
-            Thread.currentThread().interrupt(); // Re-interrupt the thread
-            updateStatusToFailed(videoId); // Still mark as failed
+            log.warn("[Async][TX:{}] Processing interrupted for video ID: {}", txName, videoId, e);
+            Thread.currentThread().interrupt();
+            // Call the dedicated service to handle status update in a new transaction
+            videoStatusUpdater.updateStatusToFailed(videoId);
         } catch (Exception e) {
-            log.error("[Async] Processing failed for video ID: {}", videoId, e);
-            updateStatusToFailed(videoId); // Use helper for failure update
+            log.error("[Async][TX:{}] Processing failed for video ID: {}", txName, videoId, e);
+            videoStatusUpdater.updateStatusToFailed(videoId);
         } finally {
-            // Cleanup handles null paths gracefully
             cleanupTempFile(tempInputPath, videoId, "input");
             cleanupTempFile(tempOutputPath, videoId, "output");
-            log.debug("[Async] Temporary file cleanup attempted for video ID: {}", videoId);
+            log.debug("[Async][TX:{}] Temporary file cleanup attempted for video ID: {}", txName, videoId);
         }
     }
 
-    /**
-     * Executes the FFmpeg process using ProcessBuilder.
-     * Handles stream reading and timeout.
-     * Throws RuntimeException on failure or timeout.
-     *
-     * @param command The command list to execute.
-     * @param videoId The ID of the video being processed (for logging).
-     * @throws IOException          If ProcessBuilder fails to start.
-     * @throws InterruptedException If waiting for the process is interrupted.
-     * @throws RuntimeException     If FFmpeg returns non-zero exit code.
-     * @throws TimeoutException     If FFmpeg process exceeds timeout.
-     */
+    @Override
     public void executeFfmpegProcess(List<String> command, Long videoId)
             throws IOException, InterruptedException, FfmpegProcessingException, TimeoutException {
 
         Process ffmpegProcess = null;
-
         try (ExecutorService streamReaderExecutor = Executors.newVirtualThreadPerTaskExecutor()) {
+            long timeoutSeconds = this.ffmpegTimeoutSeconds;
 
             ProcessBuilder processBuilder = new ProcessBuilder(command);
             ffmpegProcess = processBuilder.start();
+            log.debug("[Async] Started FFmpeg process PID: {} for video ID: {}", ffmpegProcess.pid(), videoId);
+
 
             final Process currentProcess = ffmpegProcess;
-            Future<String> stdErrFuture = streamReaderExecutor.submit(() ->
-                    readStream(currentProcess.getErrorStream(), "STDERR"));
-            Future<String> stdOutFuture = streamReaderExecutor.submit(() ->
-                    readStream(currentProcess.getInputStream(), "STDOUT"));
+            Future<String> stdErrFuture = streamReaderExecutor.submit(() -> readStream(currentProcess.getErrorStream(), "STDERR"));
+            Future<String> stdOutFuture = streamReaderExecutor.submit(() -> readStream(currentProcess.getInputStream(), "STDOUT"));
 
-            boolean finished = ffmpegProcess.waitFor(FFMPEG_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            boolean finished = ffmpegProcess.waitFor(timeoutSeconds, TimeUnit.SECONDS);
 
             if (!finished) {
-                log.error("[Async] FFmpeg process timed out after {} seconds for video ID: {}. Attempting to destroy.",
-                        FFMPEG_TIMEOUT_SECONDS, videoId);
-                throw new TimeoutException("FFmpeg process timed out for video ID: " + videoId);
+                handleFfmpegTimeout(ffmpegProcess, streamReaderExecutor, videoId, timeoutSeconds);
+            } else {
+                int exitCode = ffmpegProcess.exitValue();
+                String stdErrOutput = getStreamOutput(stdErrFuture, "STDERR", videoId);
+                String stdOutOutput = getStreamOutput(stdOutFuture, "STDOUT", videoId);
+
+                handleFfmpegCompletion(exitCode, stdOutOutput, stdErrOutput, videoId);
             }
-
-            int exitCode = ffmpegProcess.exitValue();
-            String stdErrOutput = stdErrFuture.get(10, TimeUnit.SECONDS);
-            String stdOutOutput = stdOutFuture.get(10, TimeUnit.SECONDS);
-
-            log.debug("[Async] FFmpeg STDOUT for video {}:\n{}", videoId, stdOutOutput);
-
-            if (exitCode != 0) {
-                String errorMsg = "FFmpeg processing failed with exit code " + exitCode + ".";
-                log.error("[Async] {} for video ID: {}", errorMsg, videoId);
-                log.error("[Async] FFmpeg STDERR for video {}:\n{}", videoId, stdErrOutput);
-                throw new FfmpegProcessingException(errorMsg, exitCode, stdErrOutput);
-            }
-            log.info("[Async] FFmpeg subprocess finished successfully for video ID: {}", videoId);
-
-        } catch (IOException | InterruptedException | TimeoutException e) {
+        } catch (IOException | InterruptedException | TimeoutException | FfmpegProcessingException e) {
             throw e;
         } catch (ExecutionException e) {
-            throw new FfmpegProcessingException("Error reading FFmpeg stream output for video ID " + videoId, e);
+            Throwable cause = e.getCause();
+            if (cause instanceof InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw ie;
+            } else if (cause instanceof IOException ioe) {
+                throw ioe;
+            }
+            throw new FfmpegProcessingException("Error reading FFmpeg stream output for video ID " + videoId, cause != null ? cause : e);
         } catch (Exception e) {
-            throw (RuntimeException) e;
+            throw new FfmpegProcessingException("Unexpected error during FFmpeg process execution for video ID " + videoId, e);
         } finally {
             if (ffmpegProcess != null && ffmpegProcess.isAlive()) {
-                log.warn("[Async] Forcibly destroying lingering FFmpeg process for video ID: {}", videoId);
+                log.warn("[Async] Forcibly destroying lingering FFmpeg process in finally block for video ID: {}", videoId);
                 ffmpegProcess.destroyForcibly();
             }
         }
     }
 
+    private void handleFfmpegTimeout(Process process, ExecutorService executor, Long videoId, long timeoutSeconds) throws TimeoutException {
+        String timeoutMsg = String.format("[Async] FFmpeg process timed out after %s seconds for video ID: %s. Attempting to destroy and shutdown readers.",
+                timeoutSeconds, videoId);
+        log.error(timeoutMsg);
 
-    /**
-     * Builds the FFmpeg command line arguments based on edit options.
-     */
+        log.warn("[Async] Timeout detected for video {}. Shutting down stream reader executor.", videoId);
+        List<Runnable> tasksAwaitingExecution = executor.shutdownNow();
+        if (!tasksAwaitingExecution.isEmpty()) {
+            log.warn("[Async] {} stream reader tasks were awaiting execution for video {}.", tasksAwaitingExecution.size(), videoId);
+        }
+        try {
+            if (!executor.awaitTermination(100, TimeUnit.MILLISECONDS)) {
+                log.warn("[Async] Stream reader executor did not terminate quickly after shutdownNow for video {}.", videoId);
+            }
+        } catch (InterruptedException ie) {
+            log.warn("[Async] Interrupted while waiting for stream reader executor termination for video {}.", videoId);
+            Thread.currentThread().interrupt();
+        }
+
+        if (process.isAlive()) {
+            log.warn("[Async] Forcibly destroying timed-out FFmpeg process for video ID: {}", videoId);
+            process.destroyForcibly();
+        }
+
+        throw new TimeoutException("FFmpeg process timed out for video ID: " + videoId);
+    }
+
+    private String getStreamOutput(Future<String> future, String streamName, Long videoId)
+            throws ExecutionException, InterruptedException, TimeoutException, StreamOutputRetrievalException { // Add new exception to throws clause
+        try {
+            // Set a reasonable timeout for getting the result AFTER the main process finished/timed out
+            return future.get(10, TimeUnit.SECONDS);
+        } catch (TimeoutException | ExecutionException | InterruptedException e) {
+            // These are expected potential outcomes of future.get() and should be propagated
+            // so the caller (executeFfmpegProcess) can handle them specifically if needed.
+            throw e;
+        } catch (CancellationException e) {
+            // Task was cancelled, likely due to main process timeout/shutdown. Log and return placeholder.
+            log.warn("[Async] Stream reading task for {} cancelled for video {} (likely due to timeout/shutdown): {}", streamName, videoId, e.getMessage());
+            return "[" + streamName + " reading cancelled]";
+        } catch (Exception e) {
+            // Catch any OTHER unexpected exception during future.get()
+            String errorMsg = String.format("Unexpected error retrieving %s output for video %d", streamName, videoId);
+            throw new StreamOutputRetrievalException(errorMsg, streamName, e);
+        }
+    }
+
+    private void handleFfmpegCompletion(int exitCode, String stdOutOutput, String stdErrOutput, Long videoId)
+            throws FfmpegProcessingException {
+        log.debug("[Async] FFmpeg STDOUT for video {}:\n{}", videoId, stdOutOutput);
+
+        if (exitCode != 0) {
+            String errorMsg = "FFmpeg processing failed with exit code " + exitCode + ".";
+            log.error("[Async] {} for video ID: {}", errorMsg, videoId);
+            log.error("[Async] FFmpeg STDERR for video {}:\n{}", videoId, stdErrOutput);
+            throw new FfmpegProcessingException(errorMsg, exitCode, stdErrOutput);
+        }
+        log.info("[Async] FFmpeg subprocess finished successfully with exit code 0 for video ID: {}", videoId);
+        if (log.isDebugEnabled() && stdErrOutput != null && !stdErrOutput.isBlank()) {
+            log.debug("[Async] FFmpeg STDERR (on success) for video {}:\n{}", videoId, stdErrOutput);
+        }
+    }
+
     private List<String> buildFfmpegCommand(Path inputPath, Path outputPath, EditOptions options) {
         List<String> command = new ArrayList<>();
         command.add(ffmpegExecutablePath);
         command.add("-y");
 
-        if (options.cutStartTime() != null) {
+        if (options.cutStartTime() != null && options.cutStartTime() >= 0) {
             command.add("-ss");
             command.add(String.valueOf(options.cutStartTime()));
         }
-
         command.add("-i");
         command.add(inputPath.toString());
 
-        if (options.cutEndTime() != null) {
-            command.add("-to");
-            command.add(String.valueOf(options.cutEndTime()));
+        if (options.cutEndTime() != null && options.cutEndTime() >= 0) {
+            if (options.cutStartTime() == null || options.cutEndTime() > options.cutStartTime()) {
+                command.add("-to");
+                command.add(String.valueOf(options.cutEndTime()));
+            } else {
+                log.warn("Cut end time ({}) is not after cut start time ({}), ignoring end time.", options.cutEndTime(), options.cutStartTime());
+            }
         }
 
         List<String> videoFilters = new ArrayList<>();
@@ -276,56 +323,39 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
         return command;
     }
 
-    /**
-     * Helper method to read an InputStream (like stdout or stderr) into a String.
-     */
     private String readStream(InputStream inputStream, String streamName) {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
-            String content = reader.lines().collect(Collectors.joining(System.lineSeparator()));
-            log.trace("Finished reading stream: {}", streamName);
-            return content;
+            return reader.lines().collect(Collectors.joining(System.lineSeparator()));
         } catch (IOException e) {
-            log.error("Error reading stream {}: {}", streamName, e.getMessage());
+            log.error("[Async] IOException while reading stream {}: {}", streamName, e.getMessage());
             return "[Error reading stream: " + e.getMessage() + "]";
+        } catch (UncheckedIOException e) {
+            log.warn("[Async] UncheckedIOException while reading stream {} (process likely terminated prematurely): {}", streamName, e.getMessage());
+            return "[Stream reading interrupted: " + e.getMessage() + "]";
         } catch (Exception e) {
-            log.error("Unexpected error reading stream {}: {}", streamName, e.getMessage(), e);
+            log.error("[Async] Unexpected error reading stream {}: {}", streamName, e.getMessage(), e);
             return "[Unexpected error reading stream: " + e.getMessage() + "]";
+        } finally {
+            log.trace("Finished attempting to read stream: {}", streamName);
         }
     }
 
     private void cleanupTempFile(Path tempPath, Long videoId, String type) {
         if (tempPath != null) {
             try {
-                boolean deleted = Files.deleteIfExists(tempPath);
-                if (deleted) {
+                if (Files.exists(tempPath)) {
+                    Files.delete(tempPath);
                     log.debug("[Async] Deleted temporary {} file for video {}: {}", type, videoId, tempPath);
                 } else {
-                    log.debug("[Async] Temporary {} file for video {} not found for deletion: {}", type, videoId, tempPath);
+                    log.debug("[Async] Temporary {} file for video {} not found for deletion (already deleted or never created): {}", type, videoId, tempPath);
                 }
             } catch (IOException ioEx) {
                 log.error("[Async] Failed to delete temporary {} file for video {}: {}", type, videoId, tempPath, ioEx);
+            } catch (Exception e) {
+                log.error("[Async] Unexpected error cleaning up temporary {} file for video {}: {}", type, videoId, tempPath, e);
             }
-        }
-    }
-
-    /**
-     * Helper method to update video status to FAILED.
-     */
-    private void updateStatusToFailed(Long videoId) {
-        try {
-            Video videoToFail = videoRepository.findById(videoId).orElse(null);
-            if (videoToFail != null && videoToFail.getStatus() == VideoStatus.PROCESSING) {
-                videoToFail.setStatus(VideoStatus.FAILED);
-                videoToFail.setProcessedStoragePath(null);
-                videoRepository.save(videoToFail);
-                log.info("[Async] Set status to FAILED for video ID: {}", videoId);
-            } else if (videoToFail != null) {
-                log.warn("[Async] Video {} status was not PROCESSING during failure handling (actual: {}). Not setting to FAILED.", videoId, videoToFail.getStatus());
-            } else {
-                log.error("[Async] Video {} not found during failure handling.", videoId);
-            }
-        } catch (Exception updateEx) {
-            log.error("[Async] CRITICAL: Failed to update status to FAILED for video ID: {}", videoId, updateEx);
+        } else {
+            log.trace("[Async] Temporary {} path was null for video {}, skipping cleanup.", type, videoId);
         }
     }
 }
