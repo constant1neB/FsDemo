@@ -234,7 +234,7 @@ class VideoProcessingServiceImplTest {
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
 
             assertTimeoutPreemptively(Duration.ofSeconds(10), () ->
-                    spiedService.processVideoEdits(videoId, defaultOptions, username),
+                            spiedService.processVideoEdits(videoId, defaultOptions, username),
                     "Processing logic (handling simulated error) took too long.");
 
             // Verify the flow
@@ -413,7 +413,7 @@ class VideoProcessingServiceImplTest {
 
 
         @Test
-        @DisplayName("❌ Should throw IOException if ffmpeg executable path is invalid")
+        @DisplayName("❌ Should throw FfmpegProcessingException (wrapping IOException) if ffmpeg executable path is invalid")
         void executeFfmpegProcess_InvalidPath() {
             String invalidPath = temporaryStorageLocation.resolve("non_existent_ffmpeg_command_" + UUID.randomUUID()).toString();
             VideoProcessingServiceImpl serviceWithInvalidPath = new VideoProcessingServiceImpl(
@@ -422,6 +422,8 @@ class VideoProcessingServiceImplTest {
                     invalidPath,
                     DEFAULT_PROCESSING_TIMEOUT_SECONDS
             );
+            ReflectionTestUtils.invokeMethod(serviceWithInvalidPath, "initialize");
+
 
             List<String> command = List.of(
                     invalidPath,
@@ -432,13 +434,13 @@ class VideoProcessingServiceImplTest {
             ThrowingCallable ffmpegExecution = () -> serviceWithInvalidPath.executeFfmpegProcess(command, videoId);
 
             assertThatThrownBy(ffmpegExecution)
-                    .isInstanceOf(IOException.class)
-                    .hasMessageContaining("Cannot run program");
+                    .isInstanceOf(FfmpegProcessingException.class)
+                    .hasMessageContaining("Failed to start FFmpeg process. Check path ('" + invalidPath + "') and permissions.")
+                    .hasRootCauseInstanceOf(IOException.class);
 
             assertThat(testOutputFile).doesNotExist();
         }
     }
-
 
     // ==============================================================
     // == Tests for buildFfmpegCommand (Helper Method)             ==
