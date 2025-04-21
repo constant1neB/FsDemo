@@ -28,7 +28,7 @@ public class SecurityConfig {
     private final AuthenticationFilter authenticationFilter;
     private final AuthEntryPoint exceptionHandler;
 
-    @Value("${cors.allowed.origins:*}") // Default to all for easy dev, restrict in prod
+    @Value("${cors.allowed.origins}")
     private String[] allowedOrigins;
 
     public SecurityConfig(AuthenticationFilter authenticationFilter,
