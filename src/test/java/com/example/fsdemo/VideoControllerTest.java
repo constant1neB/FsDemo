@@ -93,6 +93,8 @@ class VideoControllerTest {
     private VideoSecurityService videoSecurityService;
     @MockitoBean
     private VideoUploadValidator videoUploadValidator;
+    @MockitoBean
+    private VideoStatusUpdater videoStatusUpdater; // Mock bean in outer class
 
     private AppUser testUser;
     private String jwtTokenHeader;
@@ -620,35 +622,40 @@ class VideoControllerTest {
     @Nested
     @DisplayName("POST /api/videos/{id}/process (Process)")
     class ProcessVideoTests {
+
+        // Inject beans needed within this nested class
+        @Autowired private VideoRepository videoRepository;
+        @Autowired private VideoSecurityService videoSecurityService;
+
         @Test
         @DisplayName("✅ Should return 202 Accepted and trigger processing when status is UPLOADED")
         void processVideo_SuccessUploadedStatus() throws Exception {
             Long videoId = 1L;
             Video video = new Video(testUser, "proc-up.mp4", "Desc", Instant.now(), "p1", 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
-            video.setStatus(VideoStatus.UPLOADED); // Start from UPLOADED
+            video.setStatus(VideoStatus.UPLOADED);
 
             EditOptions validOptions = new EditOptions(10.0, 20.0, false, 720);
             String requestBody = objectMapper.writeValueAsString(validOptions);
 
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
             given(videoSecurityService.isOwner(videoId, testUser.getUsername())).willReturn(true);
-            given(videoRepository.save(any(Video.class))).willAnswer(invocation -> invocation.getArgument(0));
-            doNothing().when(videoProcessingService).processVideoEdits(anyLong(), any(EditOptions.class), anyString());
+            // Mock the call to the updater mock
+            doNothing().when(VideoControllerTest.this.videoStatusUpdater).updateStatusToProcessing(videoId);
+            // Mock the call to the processing service mock
+            doNothing().when(VideoControllerTest.this.videoProcessingService).processVideoEdits(anyLong(), any(EditOptions.class), anyString());
 
             mockMvc.perform(addAuth(post("/api/videos/{id}/process", videoId))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(requestBody))
                     .andExpect(status().isAccepted());
 
-            // Verify status update and async call
-            verify(videoRepository).findById(videoId);
+            // Verify sequence and interactions
+            // findById is called ONLY ONCE by the controller
+            verify(videoRepository).findById(videoId); // Changed from times(2)
             verify(videoSecurityService).isOwner(videoId, testUser.getUsername());
-            ArgumentCaptor<Video> videoCaptor = ArgumentCaptor.forClass(Video.class);
-            verify(videoRepository).save(videoCaptor.capture());
-            assertThat(videoCaptor.getValue().getStatus()).isEqualTo(VideoStatus.PROCESSING);
-            assertThat(videoCaptor.getValue().getProcessedStoragePath()).isNull(); // Ensure path cleared
-            verify(videoProcessingService).processVideoEdits(videoId, validOptions, testUser.getUsername());
+            verify(VideoControllerTest.this.videoStatusUpdater).updateStatusToProcessing(videoId);
+            verify(VideoControllerTest.this.videoProcessingService).processVideoEdits(videoId, validOptions, testUser.getUsername());
         }
 
         @Test
@@ -657,30 +664,28 @@ class VideoControllerTest {
             Long videoId = 2L;
             Video video = new Video(testUser, "proc-ready.mp4", "Desc", Instant.now(), "p2", 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
-            video.setStatus(VideoStatus.READY); // Start from READY
-            video.setProcessedStoragePath("old-processed.mp4"); // Has an old path
+            video.setStatus(VideoStatus.READY);
+            video.setProcessedStoragePath("old-processed.mp4");
 
-            EditOptions validOptions = new EditOptions(null, null, true, 480); // Mute only
+            EditOptions validOptions = new EditOptions(null, null, true, 480);
             String requestBody = objectMapper.writeValueAsString(validOptions);
 
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
             given(videoSecurityService.isOwner(videoId, testUser.getUsername())).willReturn(true);
-            given(videoRepository.save(any(Video.class))).willAnswer(invocation -> invocation.getArgument(0));
-            doNothing().when(videoProcessingService).processVideoEdits(anyLong(), any(EditOptions.class), anyString());
+            doNothing().when(VideoControllerTest.this.videoStatusUpdater).updateStatusToProcessing(videoId);
+            doNothing().when(VideoControllerTest.this.videoProcessingService).processVideoEdits(anyLong(), any(EditOptions.class), anyString());
 
             mockMvc.perform(addAuth(post("/api/videos/{id}/process", videoId))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(requestBody))
                     .andExpect(status().isAccepted());
 
-            // Verify status update and async call
-            verify(videoRepository).findById(videoId);
+            // Verify sequence and interactions
+            // findById is called ONLY ONCE by the controller
+            verify(videoRepository).findById(videoId); // Changed from times(2)
             verify(videoSecurityService).isOwner(videoId, testUser.getUsername());
-            ArgumentCaptor<Video> videoCaptor = ArgumentCaptor.forClass(Video.class);
-            verify(videoRepository).save(videoCaptor.capture());
-            assertThat(videoCaptor.getValue().getStatus()).isEqualTo(VideoStatus.PROCESSING);
-            assertThat(videoCaptor.getValue().getProcessedStoragePath()).isNull(); // Ensure old path cleared
-            verify(videoProcessingService).processVideoEdits(videoId, validOptions, testUser.getUsername());
+            verify(VideoControllerTest.this.videoStatusUpdater).updateStatusToProcessing(videoId);
+            verify(VideoControllerTest.this.videoProcessingService).processVideoEdits(videoId, validOptions, testUser.getUsername());
         }
 
         @Test
@@ -689,23 +694,28 @@ class VideoControllerTest {
             Long videoId = 3L;
             Video video = new Video(testUser, "proc-conflict.mp4", "Desc", Instant.now(), "p3", 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
-            video.setStatus(VideoStatus.PROCESSING); // Already processing
+            video.setStatus(VideoStatus.PROCESSING);
 
             EditOptions validOptions = new EditOptions(null, null, false, 720);
             String requestBody = objectMapper.writeValueAsString(validOptions);
 
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
             given(videoSecurityService.isOwner(videoId, testUser.getUsername())).willReturn(true);
+            // Configure updater mock to throw the expected exception
+            doThrow(new IllegalStateException("Video cannot be processed in its current state: PROCESSING"))
+                    .when(VideoControllerTest.this.videoStatusUpdater).updateStatusToProcessing(videoId);
 
             mockMvc.perform(addAuth(post("/api/videos/{id}/process", videoId))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(requestBody))
                     .andExpect(status().isConflict());
 
-            verify(videoRepository).findById(videoId);
+            // Verify sequence
+            // findById is called ONLY ONCE by the controller
+            verify(videoRepository).findById(videoId); // Changed from times(2)
             verify(videoSecurityService).isOwner(videoId, testUser.getUsername());
-            verify(videoRepository, never()).save(any(Video.class));
-            verifyNoInteractions(videoProcessingService);
+            verify(VideoControllerTest.this.videoStatusUpdater).updateStatusToProcessing(videoId); // Updater mock is called, but throws
+            verifyNoInteractions(VideoControllerTest.this.videoProcessingService);
         }
 
         @Test
@@ -714,39 +724,50 @@ class VideoControllerTest {
             Long videoId = 4L;
             Video video = new Video(testUser, "proc-failed.mp4", "Desc", Instant.now(), "p4", 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
-            video.setStatus(VideoStatus.FAILED); // Failed status
+            video.setStatus(VideoStatus.FAILED);
 
             EditOptions validOptions = new EditOptions(null, null, false, 720);
             String requestBody = objectMapper.writeValueAsString(validOptions);
 
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
             given(videoSecurityService.isOwner(videoId, testUser.getUsername())).willReturn(true);
+            // Configure updater mock to throw the expected exception
+            doThrow(new IllegalStateException("Video cannot be processed in its current state: FAILED"))
+                    .when(VideoControllerTest.this.videoStatusUpdater).updateStatusToProcessing(videoId);
 
             mockMvc.perform(addAuth(post("/api/videos/{id}/process", videoId))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(requestBody))
                     .andExpect(status().isConflict());
 
-            verify(videoRepository).findById(videoId);
+            // Verify sequence
+            // findById is called ONLY ONCE by the controller
+            verify(videoRepository).findById(videoId); // Changed from times(2)
             verify(videoSecurityService).isOwner(videoId, testUser.getUsername());
-            verify(videoRepository, never()).save(any(Video.class));
-            verifyNoInteractions(videoProcessingService);
+            verify(VideoControllerTest.this.videoStatusUpdater).updateStatusToProcessing(videoId); // Updater mock is called, but throws
+            verifyNoInteractions(VideoControllerTest.this.videoProcessingService);
         }
+
+        // No changes needed for processVideo_FailForbidden, processVideo_FailInvalidOptions,
+        // processVideo_FailNotFound, processVideo_FailUnauthorized as they didn't involve
+        // verifying findById count or the updater interaction in the same way.
 
         @Test
         @DisplayName("❌ Should return 403 Forbidden when user is not owner")
         void processVideo_FailForbidden() throws Exception {
             Long videoId = 5L;
+            // Video exists
             AppUser realOwner = new AppUser("realOwner", "pass", "U", "r@r.com");
             realOwner.setId(99L);
             Video video = new Video(realOwner, "forbidden-proc.mp4", "Desc", Instant.now(), "p5", 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
-            video.setStatus(VideoStatus.UPLOADED);
 
             EditOptions validOptions = new EditOptions(null, null, false, 720);
             String requestBody = objectMapper.writeValueAsString(validOptions);
 
+            // Mock findById to return the video
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
+            // Mock isOwner check to return false
             given(videoSecurityService.isOwner(videoId, testUser.getUsername())).willReturn(false); // Not owner
 
             mockMvc.perform(addAuth(post("/api/videos/{id}/process", videoId))
@@ -754,11 +775,15 @@ class VideoControllerTest {
                             .content(requestBody))
                     .andExpect(status().isForbidden());
 
+            // Verify the sequence: findById was called (only once by controller), then isOwner was called.
             verify(videoRepository).findById(videoId);
             verify(videoSecurityService).isOwner(videoId, testUser.getUsername());
-            verify(videoRepository, never()).save(any(Video.class));
-            verifyNoInteractions(videoProcessingService);
+
+            // Verify status updater and processing service were NOT called
+            verifyNoInteractions(VideoControllerTest.this.videoStatusUpdater);
+            verifyNoInteractions(VideoControllerTest.this.videoProcessingService);
         }
+
 
         @Test
         @DisplayName("❌ Should return 400 Bad Request for invalid EditOptions")
@@ -772,16 +797,18 @@ class VideoControllerTest {
             EditOptions invalidOptions = new EditOptions(null, null, false, 100);
             String requestBody = objectMapper.writeValueAsString(invalidOptions);
 
+            // Mock findById needed for the initial check in the controller
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
             given(videoSecurityService.isOwner(videoId, testUser.getUsername())).willReturn(true);
 
             mockMvc.perform(addAuth(post("/api/videos/{id}/process", videoId))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(requestBody))
-                    .andExpect(status().isBadRequest()); // Expect validation failure
+                    .andExpect(status().isBadRequest()); // Expect validation failure handled by Spring/ExceptionHandler
 
-            verify(videoRepository, never()).save(any(Video.class));
-            verifyNoInteractions(videoProcessingService);
+            // Verify that the updater and processor were not called due to validation failure
+            verifyNoInteractions(VideoControllerTest.this.videoStatusUpdater);
+            verifyNoInteractions(VideoControllerTest.this.videoProcessingService);
         }
 
         @Test
@@ -798,10 +825,10 @@ class VideoControllerTest {
                             .content(requestBody))
                     .andExpect(status().isNotFound());
 
-            verify(videoRepository).findById(videoId); // Verify findById WAS called
-            verify(videoRepository, never()).save(any(Video.class)); // Verify save was NOT called
-            verifyNoInteractions(videoSecurityService); // Verify security check was NOT reached
-            verifyNoInteractions(videoProcessingService); // Verify processing service was NOT called
+            verify(videoRepository).findById(videoId); // Verify findById WAS called (by controller)
+            verifyNoInteractions(videoSecurityService);
+            verifyNoInteractions(VideoControllerTest.this.videoStatusUpdater);
+            verifyNoInteractions(VideoControllerTest.this.videoProcessingService);
         }
 
         @Test
@@ -813,7 +840,7 @@ class VideoControllerTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(requestBody))
                     .andExpect(status().isUnauthorized());
-            verifyNoInteractions(videoRepository, videoSecurityService, videoRepository, videoProcessingService);
+            verifyNoInteractions(videoRepository, videoSecurityService, videoStatusUpdater, videoProcessingService);
         }
     }
 

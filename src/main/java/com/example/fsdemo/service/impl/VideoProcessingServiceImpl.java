@@ -1,7 +1,6 @@
 package com.example.fsdemo.service.impl;
 
 import com.example.fsdemo.domain.Video;
-import com.example.fsdemo.domain.Video.VideoStatus;
 import com.example.fsdemo.exceptions.FfmpegProcessingException;
 import com.example.fsdemo.exceptions.StreamOutputRetrievalException;
 import com.example.fsdemo.exceptions.VideoStorageException;
@@ -76,27 +75,24 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
 
     @Override
     @Async
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
     public void processVideoEdits(Long videoId, EditOptions options, String username) {
         String txName = TransactionSynchronizationManager.getCurrentTransactionName();
-        log.info("[Async][TX:{}] Starting processing for video ID: {} by user: {}", txName, videoId, username);
+        log.info("[Async][TX:{}] Starting processing check for video ID: {} by user: {}", txName, videoId, username);
 
         Video video = videoRepository.findById(videoId)
                 .orElseThrow(() -> {
-                    log.error("[Async][TX:{}] Video not found for processing: {}", txName, videoId);
+                    log.error("[Async][TX:{}] Video not found at start of processing task: {}", txName, videoId);
                     return new IllegalStateException("Video not found for processing: " + videoId);
                 });
 
-        if (video.getStatus() != VideoStatus.PROCESSING) {
-            log.warn("[Async][TX:{}] Video {} is not in PROCESSING state (actual: {}). Aborting processing task.",
-                    txName, videoId, video.getStatus());
-            return;
-        }
+        log.debug("[Async][TX:{}] Proceeding with processing logic for video ID: {}", txName, videoId);
 
         Resource originalResource;
         Path tempInputPath = null;
         Path tempOutputPath = null;
-        String finalProcessedFilename;
+        String finalProcessedFilename = null; // Initialize to null
 
         try {
             log.debug("[Async][TX:{}] Loading original resource from storage path: {}", txName, video.getStoragePath());
@@ -105,6 +101,7 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
                 throw new VideoStorageException("Original video resource not found or not readable: " + video.getStoragePath());
             }
 
+            // Create Temp Input File
             String tempInputFilename = "temp-in-" + UUID.randomUUID() + "-" + video.getGeneratedFilename();
             tempInputPath = temporaryStorageLocation.resolve(tempInputFilename).normalize().toAbsolutePath();
             if (!tempInputPath.startsWith(temporaryStorageLocation)) {
@@ -115,12 +112,14 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             }
             log.debug("[Async][TX:{}] Copied original video {} to temporary input: {}", txName, videoId, tempInputPath);
 
+            // Prepare Temp Output Path
             String tempOutputFilename = "temp-out-" + UUID.randomUUID() + ".mp4";
             tempOutputPath = temporaryStorageLocation.resolve(tempOutputFilename).normalize().toAbsolutePath();
             if (!tempOutputPath.startsWith(temporaryStorageLocation)) {
                 throw new VideoStorageException("Security Error: Invalid temporary output path generated: " + tempOutputPath);
             }
 
+            // Execute FFmpeg
             log.info("[Async][TX:{}] Starting FFmpeg processing for video ID: {}", txName, videoId);
             List<String> command = buildFfmpegCommand(tempInputPath, tempOutputPath, options);
             if (log.isDebugEnabled()) {
@@ -129,6 +128,7 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             executeFfmpegProcess(command, videoId);
             log.info("[Async][TX:{}] FFmpeg processing completed successfully for video ID: {}", txName, videoId);
 
+            // Move Processed File
             finalProcessedFilename = video.getId() + "-processed-" + UUID.randomUUID() + ".mp4";
             Path finalProcessedPath = processedStorageLocation.resolve(finalProcessedFilename).normalize().toAbsolutePath();
             if (!finalProcessedPath.startsWith(processedStorageLocation)) {
@@ -138,11 +138,9 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             Files.move(tempOutputPath, finalProcessedPath);
             log.debug("[Async][TX:{}] Moved processed file from {} to {}", txName, tempOutputPath, finalProcessedPath);
 
-            video.setStatus(VideoStatus.READY);
-            video.setProcessedStoragePath(finalProcessedFilename);
-            videoRepository.save(video);
-            log.info("[Async][TX:{}] Successfully processed video ID: {}. Status set to READY. Processed path: {}",
-                    txName, videoId, finalProcessedFilename);
+            // Update Status via Service
+            videoStatusUpdater.updateStatusToReady(videoId, finalProcessedFilename);
+            log.info("[Async][TX:{}] Successfully processed video ID: {}. Status update requested.", txName, videoId);
 
         } catch (InterruptedException e) {
             log.warn("[Async][TX:{}] Processing interrupted for video ID: {}", txName, videoId, e);
@@ -150,11 +148,18 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             // Call the dedicated service to handle status update in a new transaction
             videoStatusUpdater.updateStatusToFailed(videoId);
         } catch (Exception e) {
+            // Catch specific exceptions if needed, otherwise generic catch
             log.error("[Async][TX:{}] Processing failed for video ID: {}", txName, videoId, e);
+            // Call the dedicated service to handle status update in a new transaction
             videoStatusUpdater.updateStatusToFailed(videoId);
         } finally {
             cleanupTempFile(tempInputPath, videoId, "input");
-            cleanupTempFile(tempOutputPath, videoId, "output");
+            // Only cleanup output path if it wasn't successfully moved
+            if (finalProcessedFilename == null && tempOutputPath != null) {
+                cleanupTempFile(tempOutputPath, videoId, "output (failed process)");
+            } else if (tempOutputPath != null) {
+                log.trace("[Async][TX:{}] Temporary output file {} was moved, not cleaning up.", txName, tempOutputPath);
+            }
             log.debug("[Async][TX:{}] Temporary file cleanup attempted for video ID: {}", txName, videoId);
         }
     }

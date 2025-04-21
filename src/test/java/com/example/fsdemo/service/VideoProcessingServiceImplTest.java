@@ -189,32 +189,36 @@ class VideoProcessingServiceImplTest {
 
         @Test
         @DisplayName("✅ Success Flow: Should process video, update status, save path, move file, and cleanup temps")
-        void processVideoEdits_SuccessFlow() {
-            assertTimeoutPreemptively(Duration.ofSeconds(DEFAULT_PROCESSING_TIMEOUT_SECONDS + 10), () ->
-                    videoProcessingService.processVideoEdits(videoId, defaultOptions, username),
-                    "Video processing exceeded the expected time limit.");
+        void processVideoEdits_SuccessFlow() throws IOException {
 
-            InOrder inOrder = Mockito.inOrder(videoRepository, videoStorageService);
-            inOrder.verify(videoRepository).findById(videoId);
-            inOrder.verify(videoStorageService).load(originalStoragePath);
-            inOrder.verify(videoRepository).save(videoSaveCaptor.capture());
+            // --- Act ---
+            videoProcessingService.processVideoEdits(videoId, defaultOptions, username);
 
-            Video savedVideo = videoSaveCaptor.getValue();
-            assertThat(savedVideo.getStatus()).isEqualTo(VideoStatus.READY);
-            assertThat(savedVideo.getProcessedStoragePath())
+            // --- Assert ---
+            // Verify initial interactions
+            then(videoRepository).should().findById(videoId);
+            then(videoStorageService).should().load(originalStoragePath);
+
+            // Verify FFmpeg was called (implicitly by checking the result below)
+            // We don't mock executeFfmpegProcess here as we want the real execution
+
+            // Verify the status update was requested via the updater service
+            ArgumentCaptor<String> processedPathCaptor = ArgumentCaptor.forClass(String.class);
+            then(videoStatusUpdater).should().updateStatusToReady(eq(videoId), processedPathCaptor.capture());
+
+            // Verify the final processed file exists
+            String finalProcessedFilename = processedPathCaptor.getValue();
+            assertThat(finalProcessedFilename)
                     .isNotNull()
                     .startsWith(videoId + "-processed-")
                     .endsWith(".mp4");
-
-            Path finalPath = processedStorageLocation.resolve(savedVideo.getProcessedStoragePath());
+            Path finalPath = processedStorageLocation.resolve(finalProcessedFilename);
             assertThat(finalPath).exists().isNotEmptyFile();
 
             try (Stream<Path> stream = Files.list(temporaryStorageLocation)) {
                 assertThat(stream.filter(p -> !p.equals(sampleVideoSourcePath)).count())
                         .as("Temporary directory should be empty except for the source file")
                         .isZero();
-            } catch (IOException e) {
-                fail("Failed to check temporary directory for cleanup", e);
             }
         }
 

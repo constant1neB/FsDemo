@@ -26,7 +26,6 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.UUID;
 
@@ -40,14 +39,12 @@ public class VideoController {
     private final VideoRepository videoRepository;
     private final AppUserRepository appUserRepository;
     private final VideoSecurityService videoSecurityService;
+    private final VideoStatusUpdater videoStatusUpdater;
     private final VideoProcessingService videoProcessingService;
     private final VideoUploadValidator videoUploadValidator;
 
-    private static final EnumSet<Video.VideoStatus> ALLOWED_START_PROCESSING_STATUSES =
-            EnumSet.of(Video.VideoStatus.UPLOADED, Video.VideoStatus.READY);
 
     public static final String VIDEO_NOT_FOUND_MESSAGE = "Video not found";
-
     private static final String MP4_EXTENSION = ".mp4";
 
 
@@ -55,12 +52,14 @@ public class VideoController {
                            VideoRepository videoRepository,
                            AppUserRepository appUserRepository,
                            VideoSecurityService videoSecurityService,
+                           VideoStatusUpdater videoStatusUpdater,
                            VideoProcessingService videoProcessingService,
                            VideoUploadValidator videoUploadValidator) {
         this.storageService = storageService;
         this.videoRepository = videoRepository;
         this.appUserRepository = appUserRepository;
         this.videoSecurityService = videoSecurityService;
+        this.videoStatusUpdater = videoStatusUpdater;
         this.videoProcessingService = videoProcessingService;
         this.videoUploadValidator = videoUploadValidator;
     }
@@ -98,11 +97,12 @@ public class VideoController {
         try {
             storagePath = storageService.store(file, owner.getId(), generatedFilename);
         } catch (VideoStorageException e) {
+            // Let GlobalExceptionHandler handle this specific type
             throw e;
         } catch (Exception e) {
+            // Catch other potential storage errors
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to store video due to an unexpected error.", e);
         }
-
 
         // 5. Create Video Entity
         Video video = new Video(
@@ -114,7 +114,7 @@ public class VideoController {
                 file.getSize(),
                 file.getContentType()
         );
-        video.setStatus(Video.VideoStatus.UPLOADED);
+        // Status defaults to UPLOADED via entity field initializer
 
         log.debug("Attempting to save video metadata: Owner={}, GeneratedFilename={}, Size={}, MimeType={}",
                 video.getOwner().getUsername(),
@@ -195,15 +195,15 @@ public class VideoController {
     @PostMapping(value = "/{id}/process", consumes = MediaType.APPLICATION_JSON_VALUE)
     @Transactional
     public ResponseEntity<Void> processVideo(
-            @PathVariable Long id,
+            @PathVariable Long id, // Use 'id' which is the path variable name
             @RequestBody @Valid EditOptions options,
             Authentication authentication) {
 
         String username = authentication.getName();
         log.info("Processing request received for video ID: {} from user: {}", id, username);
 
-        // 1. Find Video by ID
-        Video video = videoRepository.findById(id)
+        // 1. Find Video first to ensure it exists (throws 404 if not)
+        videoRepository.findById(id)
                 .orElseThrow(() -> {
                     log.warn("Processing failed: Video not found for ID: {}", id);
                     return new ResponseStatusException(HttpStatus.NOT_FOUND, VIDEO_NOT_FOUND_MESSAGE);
@@ -211,31 +211,34 @@ public class VideoController {
 
         // 2. Check Ownership
         if (!videoSecurityService.isOwner(id, username)) {
-            log.warn("Processing forbidden for user: {} on video ID: {}", username, id);
+            log.warn("Processing forbidden for user: {} on video ID: {}", id, username);
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have permission to process this video");
         }
 
-        // 3. Check Current Status
-        if (!ALLOWED_START_PROCESSING_STATUSES.contains(video.getStatus())) {
-            log.warn("Processing conflict for user: {} on video ID: {}. Current status is '{}', requires UPLOADED or READY.",
-                    username, id, video.getStatus());
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Video cannot be processed in its current state: " + video.getStatus());
+        // 3. Update Status and Trigger Processing (using the updater service)
+        try {
+            videoStatusUpdater.updateStatusToProcessing(id);
+            log.debug("Status update to PROCESSING requested successfully for video ID: {}", id);
+
+            // Trigger Asynchronous Processing ONLY if status update was successful
+            log.info("Calling async processing service for video ID: {}", id);
+            videoProcessingService.processVideoEdits(id, options, username);
+
+        } catch (IllegalStateException e) {
+            // Catch exception from VideoStatusUpdater if preconditions fail (e.g., wrong status)
+            log.warn("Processing conflict for user: {} on video ID: {}. Reason: {}", username, id, e.getMessage());
+            if (e.getMessage() != null && e.getMessage().contains("current state")) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage(), e);
+            } else if (e.getMessage() != null && e.getMessage().contains("not found")) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage(), e);
+            } else {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to initiate video processing.", e);
+            }
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred.", e);
         }
 
-        // 4. Update Status and Clear Previous Processed Path
-        log.debug("Updating status to PROCESSING for video ID: {}", id);
-        video.setStatus(Video.VideoStatus.PROCESSING);
-        video.setProcessedStoragePath(null); // Clear any old path before starting new process
-
-        // 5. Save Status Update
-        videoRepository.save(video);
-        log.debug("Status updated and saved for video ID: {}", id);
-
-        // 6. Trigger Asynchronous Processing
-        log.info("Calling async processing service for video ID: {}", id);
-        videoProcessingService.processVideoEdits(id, options, username);
-
-        // 7. Return Accepted (202) immediately
+        // 4. Return Accepted (202) immediately
         log.info("Returning 202 Accepted for processing request of video ID: {}", id);
         return ResponseEntity.accepted().build();
     }
@@ -260,45 +263,46 @@ public class VideoController {
 
         // 3. Determine which file to download: processed if READY, original otherwise
         String pathTodownload;
+        String filenameToLoad; // Use a separate variable for what storageService needs
         if (video.getStatus() == Video.VideoStatus.READY && video.getProcessedStoragePath() != null && !video.getProcessedStoragePath().isBlank()) {
-            pathTodownload = video.getProcessedStoragePath();
-            log.debug("Preparing download for processed video. ID: {}, Path: {}", id, pathTodownload);
+            filenameToLoad = video.getProcessedStoragePath(); // This is likely just the filename/key
+            pathTodownload = filenameToLoad; // Keep pathTodownload for logging clarity if needed
+            log.debug("Preparing download for processed video. ID: {}, Path/Key: {}", id, pathTodownload);
         } else {
-            pathTodownload = video.getStoragePath(); // Original path
-            log.debug("Preparing download for original video. ID: {}, Status: {}, Path: {}", id, video.getStatus(), pathTodownload);
+            filenameToLoad = video.getStoragePath(); // This is likely just the filename/key for original
+            pathTodownload = filenameToLoad; // Keep pathTodownload for logging clarity if needed
+            log.debug("Preparing download for original video. ID: {}, Status: {}, Path/Key: {}", id, video.getStatus(), pathTodownload);
         }
 
-        if (pathTodownload == null || pathTodownload.isBlank()) {
-            log.error("Download failed for video ID {}: Storage path is missing or blank. Status: {}", id, video.getStatus());
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Video file path is missing");
+        if (filenameToLoad == null || filenameToLoad.isBlank()) {
+            log.error("Download failed for video ID {}: Storage path/key is missing or blank. Status: {}", id, video.getStatus());
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Video file path/key is missing");
         }
 
-        // 4. Load Resource from Storage using the determined path
-        log.debug("Loading video resource for ID: {} from path: {}", id, pathTodownload);
+        // 4. Load Resource from Storage using the determined filename/key
+        log.debug("Loading video resource for ID: {} from path/key: {}", id, filenameToLoad);
         Resource resource;
         try {
-            resource = storageService.load(pathTodownload);
+            resource = storageService.load(filenameToLoad);
         } catch (VideoStorageException e) {
-            // Distinguish between file not found (could be 404 or 500 depending on cause) vs other storage errors
-            if (e.getMessage() != null && e.getMessage().contains("Could not read file")) {
-                // This implies the file expected based on DB record doesn't exist in storage
+            if (e.getMessage() != null && (e.getMessage().contains("Could not read file") || e.getMessage().contains("not found"))) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Video file not found in storage", e);
             }
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error retrieving video file", e);
         }
 
         if (!resource.exists() || !resource.isReadable()) {
-            log.error("Download failed for video ID {}: Resource loaded but not found or not readable at path: {}", id, pathTodownload);
+            log.error("Download failed for video ID {}: Resource loaded but not found or not readable at path/key: {}", id, filenameToLoad);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error retrieving video file [exists/readable check failed]");
         }
 
-        // 5. Generate New UUID Filename for Download (to hide internal structure)
+        // 5. Generate New UUID Filename for Download (to hide internal structure/key)
         String downloadFilename = UUID.randomUUID() + MP4_EXTENSION;
         log.info("Generated download filename {} for video ID: {}", downloadFilename, id);
 
         // 6. Build Response
         ResponseEntity.BodyBuilder responseBuilder = ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(video.getMimeType())) // Use MIME type from DB
+                .contentType(MediaType.parseMediaType(video.getMimeType() != null ? video.getMimeType() : MediaType.APPLICATION_OCTET_STREAM_VALUE))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + downloadFilename + "\"");
         try {
             responseBuilder.contentLength(resource.contentLength());
@@ -385,7 +389,7 @@ public class VideoController {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete video record", e);
         }
 
-        // 5. Delete Files from Storage (Outside DB Transaction)
+        // 5. Delete Files from Storage (Outside DB Transaction - Best Effort)
         deleteFileFromStorage(originalStoragePath, id, "original");
         deleteFileFromStorage(processedStoragePath, id, "processed");
 
@@ -394,23 +398,24 @@ public class VideoController {
         return ResponseEntity.noContent().build();
     }
 
-    // Helper method for file deletion and logging
     private void deleteFileFromStorage(String storagePath, Long videoId, String fileType) {
         if (storagePath == null || storagePath.isBlank()) {
             log.debug("No {} storage path found for video ID {}, skipping file deletion.", fileType, videoId);
             return;
         }
 
-        log.debug("Attempting to delete {} video file for ID: {}", fileType, videoId);
+        log.debug("Attempting to delete {} video file for ID: {} using path/key: {}", fileType, videoId, storagePath);
         try {
             storageService.delete(storagePath);
             log.info("Successfully deleted {} video file for ID: {}", fileType, videoId);
         } catch (VideoStorageException e) {
             // Log as warning: DB record is gone, but file might linger. Needs monitoring/cleanup.
-            log.warn("Failed to delete {} file from storage after DB record deletion. Orphaned file likely exists. VideoID: {}, Reason: {}", fileType, videoId, e.getMessage(), e);
+            log.warn("Failed to delete {} file from storage after DB record deletion. Orphaned file likely exists. VideoID: {}, Path/Key: {}, Reason: {}",
+                    fileType, videoId, storagePath, e.getMessage(), e);
         } catch (Exception e) {
             // Catch unexpected errors during deletion
-            log.warn("Unexpected error deleting {} file from storage after DB record deletion. Orphaned file likely exists. VideoID: {}, Reason: {}", fileType, videoId, e.getMessage(), e);
+            log.warn("Unexpected error deleting {} file from storage after DB record deletion. Orphaned file likely exists. VideoID: {}, Path/Key: {}, Reason: {}",
+                    fileType, videoId, storagePath, e.getMessage(), e);
         }
     }
 }
