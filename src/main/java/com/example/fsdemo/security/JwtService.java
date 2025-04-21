@@ -5,6 +5,7 @@ import io.jsonwebtoken.Jws;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -12,6 +13,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
@@ -33,28 +35,49 @@ public class JwtService {
     public static final String FINGERPRINT_COOKIE_NAME = "__Secure-Fgp";
     public static final String FINGERPRINT_CLAIM = "fgpHash"; // Claim name for the fingerprint hash
 
-    private final SecretKey key;
+    private SecretKey key;
+    private final String base64Secret;
     private final long expirationTime;
     private final String issuer;
 
     public JwtService(
-            @Value("${jwt.secret.key.base64}") String secret,
+            @Value("${jwt.secret.key.base64}") String base64Secret,
             @Value("${jwt.expiration.ms:3600000}") long expirationTime, // Default 1 hour
             @Value("${jwt.issuer}") String issuer) {
-        byte[] decodedKey = Base64.getDecoder().decode(secret);
-        if (decodedKey.length < 32) {
-            throw new IllegalArgumentException("Secret key must be at least 256 bits (32 bytes)");
-        }
-        this.key = Keys.hmacShaKeyFor(decodedKey);
+
+        // Store the injected secret, validation happens in PostConstruct
+        this.base64Secret = base64Secret;
+
         if (issuer == null || issuer.trim().isEmpty()) {
-            throw new IllegalArgumentException("Issuer must not be null or empty");
+            throw new IllegalArgumentException("JWT Issuer (jwt.issuer) must not be null or empty");
         }
         if (expirationTime <= 0) {
-            throw new IllegalArgumentException("Expiration time must be positive");
+            throw new IllegalArgumentException("JWT Expiration time (jwt.expiration.ms) must be positive");
         }
         this.expirationTime = expirationTime;
         this.issuer = issuer;
-        log.info("JWT Service Initialized. Issuer: {}, Expiration: {}ms", issuer, expirationTime);
+        log.info("JWT Service Initializing. Issuer: {}, Expiration: {}ms", issuer, expirationTime);
+    }
+
+    @PostConstruct
+    private void initializeKey() {
+        log.debug("Attempting to initialize JWT Key from property/environment variable.");
+        if (!StringUtils.hasText(this.base64Secret)) {
+            log.error("CRITICAL: JWT Secret Key (jwt.secret.key.base64 or JWT_SECRET_KEY_BASE64 env var) is missing or empty!");
+            throw new IllegalArgumentException("JWT Secret Key (jwt.secret.key.base64) must be provided via properties or environment variable (JWT_SECRET_KEY_BASE64)");
+        }
+
+        try {
+            byte[] decodedKey = Base64.getDecoder().decode(this.base64Secret);
+            if (decodedKey.length < 32) {
+                log.error("CRITICAL: Provided JWT secret key is too short ({} bytes). Must be at least 256 bits (32 bytes).", decodedKey.length);
+                throw new IllegalArgumentException("JWT Secret key must be at least 256 bits (32 bytes)");
+            }
+            this.key = Keys.hmacShaKeyFor(decodedKey);
+            log.info("JWT Secret Key initialized successfully.");
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid Base64 encoding for JWT secret key (jwt.secret.key.base64)", e);
+        }
     }
 
     /**

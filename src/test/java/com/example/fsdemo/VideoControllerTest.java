@@ -34,6 +34,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -65,6 +66,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Transactional
 @MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("VideoController Integration Tests")
+@TestPropertySource(properties = {
+        "jwt.secret.key.base64=/////////////////////////////////////////////////////////////////////////////////////w=="
+})
 class VideoControllerTest {
 
     private static final String TEST_USERNAME = "testuploader";

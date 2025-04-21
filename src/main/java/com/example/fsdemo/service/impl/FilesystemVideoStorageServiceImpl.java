@@ -2,6 +2,7 @@ package com.example.fsdemo.service.impl;
 
 import com.example.fsdemo.exceptions.VideoStorageException;
 import com.example.fsdemo.service.VideoStorageService;
+import jakarta.annotation.PostConstruct; // Import PostConstruct
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,18 +19,23 @@ import java.nio.file.Paths;
 
 @Service
 public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
-    private static final Logger log = LoggerFactory.getLogger(FilesystemVideoStorageServiceImpl.class); // Add logger
+    private static final Logger log = LoggerFactory.getLogger(FilesystemVideoStorageServiceImpl.class);
     private final Path rootLocation;
 
-    public FilesystemVideoStorageServiceImpl(@Value("${video.storage.path:./uploads/videos}") String path) {
+    public FilesystemVideoStorageServiceImpl(@Value("${video.storage.path}") String path) {
         this.rootLocation = Paths.get(path).toAbsolutePath().normalize();
+    }
+
+    @PostConstruct
+    private void initialize() {
         try {
             Files.createDirectories(rootLocation);
-            log.info("Video storage directory initialized at: {}", this.rootLocation); // Add log
+            log.info("Video storage directory initialized at: {}", this.rootLocation);
         } catch (IOException e) {
             throw new VideoStorageException("Could not initialize storage directory: " + this.rootLocation, e);
         }
     }
+
 
     @Override
     public String store(MultipartFile file, Long userId, String generatedFilename) throws VideoStorageException {
@@ -50,21 +56,18 @@ public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
             }
 
             if (Files.exists(destinationFile)) {
-                // This is unlikely with UUIDs, but good practice
                 log.warn("Attempted to store file that already exists (UUID collision?): {}", destinationFile);
-                // Decide policy: overwrite or fail. Failing is safer.
                 throw new VideoStorageException("File already exists: " + generatedFilename);
             }
 
             log.debug("Storing file {} to {}", generatedFilename, destinationFile);
-            // Use try-with-resources for the input stream
             try (var inputStream = file.getInputStream()) {
-                Files.copy(inputStream, destinationFile); // Use Files.copy, transferTo can be problematic sometimes
+                Files.copy(inputStream, destinationFile);
             }
-            log.info("Successfully stored file {} for user {}", generatedFilename, userId); // Log success
-            return generatedFilename; // Assuming storagePath is just the filename for simplicity here
+            log.info("Successfully stored file {} for user {}", generatedFilename, userId);
+            return generatedFilename;
 
-        } catch (IOException e) {// Log error details
+        } catch (IOException e) {
             throw new VideoStorageException("Failed to store file " + generatedFilename, e);
         }
     }
@@ -75,7 +78,6 @@ public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
             Path file = rootLocation.resolve(storagePath).normalize().toAbsolutePath();
             log.debug("Attempting to load resource from path: {}", file);
 
-            // Security check: Ensure the path is still within the root directory after resolving
             if (!file.startsWith(this.rootLocation)) {
                 log.error("Security check failed: Attempt to load file outside storage root. Requested path: {}, Resolved path: {}", storagePath, file);
                 throw new VideoStorageException("Security check failed: Cannot load file outside designated directory: " + storagePath);
@@ -87,12 +89,11 @@ public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
                 return resource;
             } else {
                 log.warn("Could not read file or file does not exist: {}", file);
-                throw new VideoStorageException("Could not read file: " + storagePath);
+                throw new VideoStorageException("Could not read file: " + storagePath + " (Not found or not readable)");
             }
         } catch (MalformedURLException e) {
             throw new VideoStorageException("Could not read file (Malformed URL): " + storagePath, e);
         } catch (VideoStorageException e) {
-            // Re-throw security exceptions directly
             throw e;
         } catch (Exception e) {
             throw new VideoStorageException("Unexpected error loading file: " + storagePath, e);
@@ -103,11 +104,8 @@ public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
     public void delete(String storagePath) throws VideoStorageException {
         try {
             Path file = rootLocation.resolve(storagePath).normalize().toAbsolutePath();
-            log.debug("Attempting to delete file at path: {}", file);
 
-            // Security check: Ensure the path is still within the root directory
             if (!file.startsWith(this.rootLocation)) {
-                log.error("Security check failed: Attempt to delete file outside storage root. Requested path: {}, Resolved path: {}", storagePath, file);
                 throw new VideoStorageException("Security check failed: Cannot delete file outside designated directory: " + storagePath);
             }
 
@@ -116,13 +114,10 @@ public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
                 log.info("Successfully deleted file: {}", file);
             } else {
                 log.warn("Attempted to delete non-existent file: {}", file);
-                // Decide if this is an error or acceptable (idempotency)
-                // For now, let's not throw an error if it's already gone.
             }
         } catch (IOException e) {
             throw new VideoStorageException("Failed to delete file: " + storagePath, e);
         } catch (VideoStorageException e) {
-            // Re-throw security exceptions directly
             throw e;
         } catch (Exception e) {
             throw new VideoStorageException("Unexpected error deleting file: " + storagePath, e);
