@@ -65,15 +65,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Transactional
 @MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("VideoController Integration Tests")
-
 class VideoControllerTest {
 
     private static final String TEST_USERNAME = "testuploader";
     private static final String TEST_PASSWORD = "testpass12345";
     private static final String TEST_EMAIL = "uploader@example.com";
-    private static final String SAMPLE_FILENAME_ORIGINAL = "sample.mp4"; // Original filename for test file creation
+    private static final String SAMPLE_FILENAME_ORIGINAL = "sample.mp4";
     private static final String VIDEO_MIME_TYPE = "video/mp4";
-    private static final String DEFAULT_STORAGE_PATH = "default-storage-path-returned-by-mock.mp4"; // Example mock return value
+    private static final String DEFAULT_STORAGE_PATH = "default-storage-path-returned-by-mock.mp4";
 
     @Autowired
     private MockMvc mockMvc;
@@ -95,7 +94,7 @@ class VideoControllerTest {
     @MockitoBean
     private VideoUploadValidator videoUploadValidator;
     @MockitoBean
-    private VideoStatusUpdater videoStatusUpdater; // Mock bean in outer class
+    private VideoStatusUpdater videoStatusUpdater;
 
     private AppUser testUser;
     private String jwtTokenHeader;
@@ -172,11 +171,9 @@ class VideoControllerTest {
         assert setCookieHeader != null;
         String cookieValue = setCookieHeader.split(";")[0].split("=")[1];
         fingerprintCookie = new Cookie(JwtService.FINGERPRINT_COOKIE_NAME, cookieValue);
-        // Set attributes manually as MockHttpServletResponse doesn't parse them fully
         fingerprintCookie.setHttpOnly(true);
         fingerprintCookie.setSecure(true);
         fingerprintCookie.setPath("/api");
-        // SameSite=Strict is default or handled by browser/framework, harder to assert here directly
 
         assertThat(fingerprintCookie.getValue()).isNotBlank();
     }
@@ -268,7 +265,7 @@ class VideoControllerTest {
 
             mockMvc.perform(addAuth(multipart("/api/videos")
                             .file(videoFile)
-                            .param("description", ""))) // Empty description
+                            .param("description", "")))
                     .andExpect(status().isCreated());
 
             verify(videoUploadValidator).validate(any(MultipartFile.class));
@@ -353,9 +350,11 @@ class VideoControllerTest {
         @Test
         @DisplayName("✅ Should return only the authenticated user's videos")
         void listVideos_Success() throws Exception {
-            Video userVideo1 = new Video(testUser, "uuid-user1.mp4", "User Video 1", Instant.now(), "p1", 100L, VIDEO_MIME_TYPE);
+            Video userVideo1 = new Video(testUser, "uuid-user1.mp4", "User Video 1",
+                    Instant.now(), "p1", 100L, VIDEO_MIME_TYPE);
             userVideo1.setId(1L);
-            Video userVideo2 = new Video(testUser, "uuid-user2.mp4", "User Video 2", Instant.now(), "p2", 200L, VIDEO_MIME_TYPE);
+            Video userVideo2 = new Video(testUser, "uuid-user2.mp4", "User Video 2",
+                    Instant.now(), "p2", 200L, VIDEO_MIME_TYPE);
             userVideo2.setId(2L);
 
             given(videoRepository.findByOwnerUsername(TEST_USERNAME))
@@ -408,11 +407,12 @@ class VideoControllerTest {
         @DisplayName("✅ Should return video details when user is owner")
         void getVideoDetails_SuccessOwner() throws Exception {
             Long videoId = 1L;
-            Video video = new Video(testUser, "uuid-details.mp4", "Details", Instant.now(), "path/details", 123L, VIDEO_MIME_TYPE);
+            Video video = new Video(testUser, "uuid-details.mp4", "Details",
+                    Instant.now(), "path/details", 123L, VIDEO_MIME_TYPE);
             video.setId(videoId);
 
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoSecurityService.canView(videoId, TEST_USERNAME)).willReturn(true); // User can view
+            given(videoSecurityService.isOwner(videoId, TEST_USERNAME)).willReturn(true);
 
             mockMvc.perform(addAuth(get("/api/videos/{id}", videoId)))
                     .andExpect(status().isOk())
@@ -422,7 +422,7 @@ class VideoControllerTest {
                     .andExpect(jsonPath("$.fileSize").value(123L));
 
             verify(videoRepository).findById(videoId);
-            verify(videoSecurityService).canView(videoId, TEST_USERNAME);
+            verify(videoSecurityService).isOwner(videoId, TEST_USERNAME);
         }
 
         @Test
@@ -435,26 +435,27 @@ class VideoControllerTest {
                     .andExpect(status().isNotFound());
 
             verify(videoRepository).findById(videoId);
-            verify(videoSecurityService, never()).canView(anyLong(), anyString());
+            verify(videoSecurityService, never()).isOwner(anyLong(), anyString());
         }
 
         @Test
-        @DisplayName("❌ Should return 403 Forbidden when user cannot view")
+        @DisplayName("❌ Should return 403 Forbidden when user cannot view (is not owner)")
         void getVideoDetails_FailForbidden() throws Exception {
             Long videoId = 2L;
             AppUser anotherOwner = new AppUser("another", "pass", "U", "a@a.com");
             anotherOwner.setId(99L);
-            Video video = new Video(anotherOwner, "private.mp4", "Private", Instant.now(), "path/private", 100L, VIDEO_MIME_TYPE);
+            Video video = new Video(anotherOwner, "private.mp4", "Private",
+                    Instant.now(), "path/private", 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
 
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoSecurityService.canView(videoId, TEST_USERNAME)).willReturn(false); // User cannot view
+            given(videoSecurityService.isOwner(videoId, TEST_USERNAME)).willReturn(false); // User is NOT owner
 
             mockMvc.perform(addAuth(get("/api/videos/{id}", videoId)))
                     .andExpect(status().isForbidden());
 
             verify(videoRepository).findById(videoId);
-            verify(videoSecurityService).canView(videoId, TEST_USERNAME);
+            verify(videoSecurityService).isOwner(videoId, TEST_USERNAME);
         }
 
         @Test
@@ -485,19 +486,21 @@ class VideoControllerTest {
             Resource videoResource = new ByteArrayResource("original content".getBytes());
 
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoSecurityService.canView(videoId, TEST_USERNAME)).willReturn(true);
+            // FIX: Mock isOwner instead of canView
+            given(videoSecurityService.isOwner(videoId, TEST_USERNAME)).willReturn(true);
             given(storageService.load(originalPath)).willReturn(videoResource); // Load using the DB path
 
             mockMvc.perform(addAuth(get("/api/videos/{id}/download", videoId)))
                     .andExpect(status().isOk())
                     .andExpect(content().contentType(VIDEO_MIME_TYPE))
-                    .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, matchesPattern("attachment; filename=\"[a-f0-9-]+\\.mp4\"")))
+                    .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, matchesPattern
+                            ("attachment; filename=\"[a-f0-9-]+\\.mp4\"")))
                     .andExpect(content().bytes("original content".getBytes()));
 
             verify(videoRepository).findById(videoId);
-            verify(videoSecurityService).canView(videoId, TEST_USERNAME);
-            verify(storageService).load(originalPath); // Verify correct path loaded
-            verify(storageService, never()).load(video.getProcessedStoragePath()); // Ensure processed wasn't loaded
+            verify(videoSecurityService).isOwner(videoId, TEST_USERNAME);
+            verify(storageService).load(originalPath);
+            verify(storageService, never()).load(video.getProcessedStoragePath());
         }
 
         @Test
@@ -506,29 +509,29 @@ class VideoControllerTest {
             Long videoId = 2L;
             String originalFilename = "orig-uuid.mp4";
             String originalPath = "storage/" + originalFilename;
-            String processedFilename = "processed-uuid.mp4"; // Just the filename/key
-            //String processedFullPath = "processed/storage/" + processedFilename; // Conceptual full path if needed by service
+            String processedFilename = "processed-uuid.mp4";
 
-            Video video = new Video(testUser, originalFilename, "Proc", Instant.now(), originalPath, 100L, VIDEO_MIME_TYPE);
+            Video video = new Video(testUser, originalFilename, "Proc",
+                    Instant.now(), originalPath, 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
             video.setStatus(VideoStatus.READY);
-            video.setProcessedStoragePath(processedFilename); // Store just the key
+            video.setProcessedStoragePath(processedFilename);
 
             Resource videoResource = new ByteArrayResource("processed content".getBytes());
 
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoSecurityService.canView(videoId, TEST_USERNAME)).willReturn(true);
-            // Assume storageService.load() understands the processedFilename key directly
+            given(videoSecurityService.isOwner(videoId, TEST_USERNAME)).willReturn(true);
             given(storageService.load(processedFilename)).willReturn(videoResource);
 
             mockMvc.perform(addAuth(get("/api/videos/{id}/download", videoId)))
                     .andExpect(status().isOk())
                     .andExpect(content().contentType(VIDEO_MIME_TYPE))
-                    .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, matchesPattern("attachment; filename=\"[a-f0-9-]+\\.mp4\"")))
+                    .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, matchesPattern
+                            ("attachment; filename=\"[a-f0-9-]+\\.mp4\"")))
                     .andExpect(content().bytes("processed content".getBytes()));
 
             verify(videoRepository).findById(videoId);
-            verify(videoSecurityService).canView(videoId, TEST_USERNAME);
+            verify(videoSecurityService).isOwner(videoId, TEST_USERNAME);
             verify(storageService).load(processedFilename); // Verify correct path loaded
             verify(storageService, never()).load(originalPath); // Ensure original wasn't loaded
         }
@@ -538,12 +541,13 @@ class VideoControllerTest {
         void downloadVideo_FailStorageFileNotFound() throws Exception {
             Long videoId = 3L;
             String storagePath = "path/missing.mp4";
-            Video video = new Video(testUser, "missing-uuid.mp4", "Missing", Instant.now(), storagePath, 100L, VIDEO_MIME_TYPE);
+            Video video = new Video(testUser, "missing-uuid.mp4", "Missing",
+                    Instant.now(), storagePath, 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
             video.setStatus(VideoStatus.UPLOADED);
 
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoSecurityService.canView(videoId, TEST_USERNAME)).willReturn(true);
+            given(videoSecurityService.isOwner(videoId, TEST_USERNAME)).willReturn(true);
             // Simulate storage service throwing exception indicating file not found
             given(storageService.load(storagePath)).willThrow(new VideoStorageException("Could not read file: " + storagePath));
 
@@ -551,7 +555,8 @@ class VideoControllerTest {
                     .andExpect(status().isNotFound()); // Expect 404 as the file resource is gone
 
             verify(videoRepository).findById(videoId);
-            verify(videoSecurityService).canView(videoId, TEST_USERNAME);
+            // FIX: Verify isOwner instead of canView
+            verify(videoSecurityService).isOwner(videoId, TEST_USERNAME);
             verify(storageService).load(storagePath);
         }
 
@@ -560,19 +565,20 @@ class VideoControllerTest {
         void downloadVideo_FailStorageOtherError() throws Exception {
             Long videoId = 4L;
             String storagePath = "path/error.mp4";
-            Video video = new Video(testUser, "error-uuid.mp4", "Error", Instant.now(), storagePath, 100L, VIDEO_MIME_TYPE);
+            Video video = new Video(testUser, "error-uuid.mp4", "Error",
+                    Instant.now(), storagePath, 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
             video.setStatus(VideoStatus.UPLOADED);
 
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoSecurityService.canView(videoId, TEST_USERNAME)).willReturn(true);
+            given(videoSecurityService.isOwner(videoId, TEST_USERNAME)).willReturn(true);
             given(storageService.load(storagePath)).willThrow(new VideoStorageException("General storage failure"));
 
             mockMvc.perform(addAuth(get("/api/videos/{id}/download", videoId)))
                     .andExpect(status().isInternalServerError());
 
             verify(videoRepository).findById(videoId);
-            verify(videoSecurityService).canView(videoId, TEST_USERNAME);
+            verify(videoSecurityService).isOwner(videoId, TEST_USERNAME);
             verify(storageService).load(storagePath);
         }
 
@@ -596,17 +602,18 @@ class VideoControllerTest {
             Long videoId = 5L;
             AppUser anotherOwner = new AppUser("another", "pass", "U", "a@a.com");
             anotherOwner.setId(99L);
-            Video video = new Video(anotherOwner, "private-dl.mp4", "Private", Instant.now(), "path/private-dl", 100L, VIDEO_MIME_TYPE);
+            Video video = new Video(anotherOwner, "private-dl.mp4", "Private",
+                    Instant.now(), "path/private-dl", 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
 
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoSecurityService.canView(videoId, TEST_USERNAME)).willReturn(false); // Cannot view
+            given(videoSecurityService.isOwner(videoId, TEST_USERNAME)).willReturn(false); // Cannot view (not owner)
 
             mockMvc.perform(addAuth(get("/api/videos/{id}/download", videoId)))
                     .andExpect(status().isForbidden());
 
             verify(videoRepository).findById(videoId);
-            verify(videoSecurityService).canView(videoId, TEST_USERNAME);
+            verify(videoSecurityService).isOwner(videoId, TEST_USERNAME);
             verifyNoInteractions(storageService);
         }
 
@@ -624,15 +631,17 @@ class VideoControllerTest {
     @DisplayName("POST /api/videos/{id}/process (Process)")
     class ProcessVideoTests {
 
-        // Inject beans needed within this nested class
-        @Autowired private VideoRepository videoRepository;
-        @Autowired private VideoSecurityService videoSecurityService;
+        @Autowired
+        private VideoRepository videoRepository;
+        @Autowired
+        private VideoSecurityService videoSecurityService;
 
         @Test
         @DisplayName("✅ Should return 202 Accepted and trigger processing when status is UPLOADED")
         void processVideo_SuccessUploadedStatus() throws Exception {
             Long videoId = 1L;
-            Video video = new Video(testUser, "proc-up.mp4", "Desc", Instant.now(), "p1", 100L, VIDEO_MIME_TYPE);
+            Video video = new Video(testUser, "proc-up.mp4", "Desc",
+                    Instant.now(), "p1", 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
             video.setStatus(VideoStatus.UPLOADED);
 
@@ -644,7 +653,9 @@ class VideoControllerTest {
             // Mock the call to the updater mock
             doNothing().when(VideoControllerTest.this.videoStatusUpdater).updateStatusToProcessing(videoId);
             // Mock the call to the processing service mock
-            doNothing().when(VideoControllerTest.this.videoProcessingService).processVideoEdits(anyLong(), any(EditOptions.class), anyString());
+            doNothing()
+                    .when(VideoControllerTest.this.videoProcessingService)
+                    .processVideoEdits(anyLong(), any(EditOptions.class), anyString());
 
             mockMvc.perform(addAuth(post("/api/videos/{id}/process", videoId))
                             .contentType(MediaType.APPLICATION_JSON)
@@ -652,8 +663,7 @@ class VideoControllerTest {
                     .andExpect(status().isAccepted());
 
             // Verify sequence and interactions
-            // findById is called ONLY ONCE by the controller
-            verify(videoRepository).findById(videoId); // Changed from times(2)
+            verify(videoRepository).findById(videoId);
             verify(videoSecurityService).isOwner(videoId, testUser.getUsername());
             verify(VideoControllerTest.this.videoStatusUpdater).updateStatusToProcessing(videoId);
             verify(VideoControllerTest.this.videoProcessingService).processVideoEdits(videoId, validOptions, testUser.getUsername());
@@ -663,7 +673,8 @@ class VideoControllerTest {
         @DisplayName("✅ Should return 202 Accepted and trigger processing when status is READY")
         void processVideo_SuccessReadyStatus() throws Exception {
             Long videoId = 2L;
-            Video video = new Video(testUser, "proc-ready.mp4", "Desc", Instant.now(), "p2", 100L, VIDEO_MIME_TYPE);
+            Video video = new Video(testUser, "proc-ready.mp4", "Desc",
+                    Instant.now(), "p2", 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
             video.setStatus(VideoStatus.READY);
             video.setProcessedStoragePath("old-processed.mp4");
@@ -682,8 +693,7 @@ class VideoControllerTest {
                     .andExpect(status().isAccepted());
 
             // Verify sequence and interactions
-            // findById is called ONLY ONCE by the controller
-            verify(videoRepository).findById(videoId); // Changed from times(2)
+            verify(videoRepository).findById(videoId);
             verify(videoSecurityService).isOwner(videoId, testUser.getUsername());
             verify(VideoControllerTest.this.videoStatusUpdater).updateStatusToProcessing(videoId);
             verify(VideoControllerTest.this.videoProcessingService).processVideoEdits(videoId, validOptions, testUser.getUsername());
@@ -693,7 +703,8 @@ class VideoControllerTest {
         @DisplayName("❌ Should return 409 Conflict when already PROCESSING")
         void processVideo_FailConflictProcessing() throws Exception {
             Long videoId = 3L;
-            Video video = new Video(testUser, "proc-conflict.mp4", "Desc", Instant.now(), "p3", 100L, VIDEO_MIME_TYPE);
+            Video video = new Video(testUser, "proc-conflict.mp4", "Desc",
+                    Instant.now(), "p3", 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
             video.setStatus(VideoStatus.PROCESSING);
 
@@ -712,8 +723,7 @@ class VideoControllerTest {
                     .andExpect(status().isConflict());
 
             // Verify sequence
-            // findById is called ONLY ONCE by the controller
-            verify(videoRepository).findById(videoId); // Changed from times(2)
+            verify(videoRepository).findById(videoId);
             verify(videoSecurityService).isOwner(videoId, testUser.getUsername());
             verify(VideoControllerTest.this.videoStatusUpdater).updateStatusToProcessing(videoId); // Updater mock is called, but throws
             verifyNoInteractions(VideoControllerTest.this.videoProcessingService);
@@ -742,16 +752,11 @@ class VideoControllerTest {
                     .andExpect(status().isConflict());
 
             // Verify sequence
-            // findById is called ONLY ONCE by the controller
-            verify(videoRepository).findById(videoId); // Changed from times(2)
+            verify(videoRepository).findById(videoId);
             verify(videoSecurityService).isOwner(videoId, testUser.getUsername());
             verify(VideoControllerTest.this.videoStatusUpdater).updateStatusToProcessing(videoId); // Updater mock is called, but throws
             verifyNoInteractions(VideoControllerTest.this.videoProcessingService);
         }
-
-        // No changes needed for processVideo_FailForbidden, processVideo_FailInvalidOptions,
-        // processVideo_FailNotFound, processVideo_FailUnauthorized as they didn't involve
-        // verifying findById count or the updater interaction in the same way.
 
         @Test
         @DisplayName("❌ Should return 403 Forbidden when user is not owner")
@@ -760,7 +765,8 @@ class VideoControllerTest {
             // Video exists
             AppUser realOwner = new AppUser("realOwner", "pass", "U", "r@r.com");
             realOwner.setId(99L);
-            Video video = new Video(realOwner, "forbidden-proc.mp4", "Desc", Instant.now(), "p5", 100L, VIDEO_MIME_TYPE);
+            Video video = new Video(realOwner, "forbidden-proc.mp4", "Desc",
+                    Instant.now(), "p5", 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
 
             EditOptions validOptions = new EditOptions(null, null, false, 720);
@@ -776,7 +782,7 @@ class VideoControllerTest {
                             .content(requestBody))
                     .andExpect(status().isForbidden());
 
-            // Verify the sequence: findById was called (only once by controller), then isOwner was called.
+            // Verify the sequence: findById was called, then isOwner was called.
             verify(videoRepository).findById(videoId);
             verify(videoSecurityService).isOwner(videoId, testUser.getUsername());
 
@@ -790,7 +796,8 @@ class VideoControllerTest {
         @DisplayName("❌ Should return 400 Bad Request for invalid EditOptions")
         void processVideo_FailInvalidOptions() throws Exception {
             Long videoId = 6L;
-            Video video = new Video(testUser, "inv-opt.mp4", "Desc", Instant.now(), "p6", 100L, VIDEO_MIME_TYPE);
+            Video video = new Video(testUser, "inv-opt.mp4", "Desc",
+                    Instant.now(), "p6", 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
             video.setStatus(VideoStatus.UPLOADED);
 
@@ -884,7 +891,8 @@ class VideoControllerTest {
         void updateDescription_FailInvalidFormat() throws Exception {
             Long videoId = 2L;
             String invalidDesc = "Invalid <script>";
-            Video video = new Video(testUser, "inv-desc.mp4", "Old", Instant.now(), "p2", 100L, VIDEO_MIME_TYPE);
+            Video video = new Video(testUser, "inv-desc.mp4", "Old",
+                    Instant.now(), "p2", 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
 
             UpdateVideoRequest request = new UpdateVideoRequest(invalidDesc);
@@ -907,7 +915,8 @@ class VideoControllerTest {
             Long videoId = 3L;
             AppUser realOwner = new AppUser("realOwner", "pass", "U", "r@r.com");
             realOwner.setId(99L);
-            Video video = new Video(realOwner, "forbidden-upd.mp4", "Old", Instant.now(), "p3", 100L, VIDEO_MIME_TYPE);
+            Video video = new Video(realOwner, "forbidden-upd.mp4", "Old",
+                    Instant.now(), "p3", 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
 
             UpdateVideoRequest request = new UpdateVideoRequest("New Desc");
@@ -970,12 +979,13 @@ class VideoControllerTest {
             Long videoId = 1L;
             String originalPath = "path/orig-del.mp4";
             String processedPath = "path/proc-del.mp4";
-            Video video = new Video(testUser, "del-uuid.mp4", "To Del", Instant.now(), originalPath, 100L, VIDEO_MIME_TYPE);
+            Video video = new Video(testUser, "del-uuid.mp4", "To Del",
+                    Instant.now(), originalPath, 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
             video.setProcessedStoragePath(processedPath); // Has processed file
 
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoSecurityService.canDelete(videoId, TEST_USERNAME)).willReturn(true);
+            given(videoSecurityService.isOwner(videoId, TEST_USERNAME)).willReturn(true);
             doNothing().when(videoRepository).delete(video); // Mock DB delete
             doNothing().when(storageService).delete(originalPath);
             doNothing().when(storageService).delete(processedPath);
@@ -986,7 +996,7 @@ class VideoControllerTest {
             // Verify order: find, check perm, delete DB, delete files
             InOrder order = inOrder(videoRepository, videoSecurityService, storageService);
             order.verify(videoRepository).findById(videoId);
-            order.verify(videoSecurityService).canDelete(videoId, TEST_USERNAME);
+            order.verify(videoSecurityService).isOwner(videoId, TEST_USERNAME);
             order.verify(videoRepository).delete(video);
             order.verify(storageService).delete(originalPath);
             order.verify(storageService).delete(processedPath);
@@ -997,12 +1007,13 @@ class VideoControllerTest {
         void deleteVideo_SuccessNoProcessedFile() throws Exception {
             Long videoId = 2L;
             String originalPath = "path/orig-only-del.mp4";
-            Video video = new Video(testUser, "del-orig-uuid.mp4", "To Del", Instant.now(), originalPath, 100L, VIDEO_MIME_TYPE);
+            Video video = new Video(testUser, "del-orig-uuid.mp4", "To Del",
+                    Instant.now(), originalPath, 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
             video.setProcessedStoragePath(null); // No processed file
 
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoSecurityService.canDelete(videoId, TEST_USERNAME)).willReturn(true);
+            given(videoSecurityService.isOwner(videoId, TEST_USERNAME)).willReturn(true);
             doNothing().when(videoRepository).delete(video);
             doNothing().when(storageService).delete(originalPath);
 
@@ -1011,10 +1022,9 @@ class VideoControllerTest {
 
             InOrder order = inOrder(videoRepository, videoSecurityService, storageService);
             order.verify(videoRepository).findById(videoId);
-            order.verify(videoSecurityService).canDelete(videoId, TEST_USERNAME);
+            order.verify(videoSecurityService).isOwner(videoId, TEST_USERNAME);
             order.verify(videoRepository).delete(video);
             order.verify(storageService).delete(originalPath);
-            // Verify delete was NOT called for the null/blank processed path
             verify(storageService, never()).delete(isNull());
             verify(storageService, never()).delete("");
         }
@@ -1026,21 +1036,24 @@ class VideoControllerTest {
             Long videoId = 3L;
             String originalPath = "path/fail-del-orig.mp4";
             String processedPath = "path/fail-del-proc.mp4";
-            Video video = new Video(testUser, "fail-del-uuid.mp4", "Fail Del", Instant.now(), originalPath, 100L, VIDEO_MIME_TYPE);
+            Video video = new Video(testUser, "fail-del-uuid.mp4", "Fail Del",
+                    Instant.now(), originalPath, 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
             video.setProcessedStoragePath(processedPath);
 
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoSecurityService.canDelete(videoId, TEST_USERNAME)).willReturn(true);
+            given(videoSecurityService.isOwner(videoId, TEST_USERNAME)).willReturn(true);
             doNothing().when(videoRepository).delete(video); // DB delete succeeds
             // Storage delete fails
             doThrow(new VideoStorageException("Cannot delete file")).when(storageService).delete(originalPath);
             doThrow(new VideoStorageException("Cannot delete file")).when(storageService).delete(processedPath);
 
             mockMvc.perform(addAuth(delete("/api/videos/{id}", videoId)))
-                    .andExpect(status().isNoContent()); // Still return 204
+                    .andExpect(status().isNoContent());
 
             // Verify DB delete happened, and storage delete was attempted
+            verify(videoRepository).findById(videoId);
+            verify(videoSecurityService).isOwner(videoId, TEST_USERNAME);
             verify(videoRepository).delete(video);
             verify(storageService).delete(originalPath);
             verify(storageService).delete(processedPath);
@@ -1052,17 +1065,18 @@ class VideoControllerTest {
             Long videoId = 4L;
             AppUser realOwner = new AppUser("realOwner", "pass", "U", "r@r.com");
             realOwner.setId(99L);
-            Video video = new Video(realOwner, "forbidden-del.mp4", "Old", Instant.now(), "p4", 100L, VIDEO_MIME_TYPE);
+            Video video = new Video(realOwner, "forbidden-del.mp4", "Old",
+                    Instant.now(), "p4", 100L, VIDEO_MIME_TYPE);
             video.setId(videoId);
 
             given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoSecurityService.canDelete(videoId, TEST_USERNAME)).willReturn(false); // Cannot delete
+            given(videoSecurityService.isOwner(videoId, TEST_USERNAME)).willReturn(false); // Cannot delete (not owner)
 
             mockMvc.perform(addAuth(delete("/api/videos/{id}", videoId)))
                     .andExpect(status().isForbidden());
 
             verify(videoRepository).findById(videoId);
-            verify(videoSecurityService).canDelete(videoId, TEST_USERNAME);
+            verify(videoSecurityService).isOwner(videoId, TEST_USERNAME);
             verify(videoRepository, never()).delete(any(Video.class));
             verifyNoInteractions(storageService);
         }
