@@ -15,20 +15,24 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
+import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.*;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -57,9 +61,9 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
         this.videoRepository = videoRepository;
         this.videoStorageService = videoStorageService;
         this.videoStatusUpdater = videoStatusUpdater;
-        this.processedStorageLocation = Paths.get(processedPath).toAbsolutePath().normalize();
-        this.temporaryStorageLocation = Paths.get(tempPath).toAbsolutePath().normalize();
-        this.ffmpegExecutablePath = ffmpegPath;
+        this.processedStorageLocation = validateStoragePath(processedPath, "Processed storage");
+        this.temporaryStorageLocation = validateStoragePath(tempPath, "Temporary storage");
+        this.ffmpegExecutablePath = validateExecutablePath(ffmpegPath);
         this.ffmpegTimeoutSeconds = ffmpegTimeoutSeconds;
     }
 
@@ -79,6 +83,8 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
     public void processVideoEdits(Long videoId, EditOptions options, String username) {
         String txName = TransactionSynchronizationManager.getCurrentTransactionName();
         log.info("[Async][TX:{}] Starting processing check for video ID: {} by user: {}", txName, videoId, username);
+
+        validateEditOptions(options);
 
         Video video = videoRepository.findById(videoId)
                 .orElseThrow(() -> {
@@ -388,6 +394,74 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             }
         } else {
             log.trace("[Async] Temporary {} path was null for video {}, skipping cleanup.", type, videoId);
+        }
+    }
+
+    //    Helper methods to validate paths
+    private Path validateStoragePath(String pathString, String purpose) {
+        // 1. Basic null/blank check
+        if (pathString == null || pathString.isBlank()) {
+            throw new IllegalArgumentException(purpose + " path cannot be blank");
+        }
+
+        // 2. Block directory traversal attempts
+        if (pathString.contains("../") || pathString.contains("..\\") ||
+                pathString.contains("~/") || pathString.contains("~\\")) {
+            throw new IllegalArgumentException(purpose + " path contains traversal patterns");
+        }
+
+        // 3. Convert to Path and normalize
+        Path path;
+        try {
+            path = Paths.get(pathString).toAbsolutePath().normalize();
+        } catch (InvalidPathException e) {
+            throw new IllegalArgumentException("Invalid path format", e);
+        }
+
+        // 4. Verify after normalization
+        String normalized = path.toString();
+        if (normalized.contains("../") || normalized.contains("..\\")) {
+            throw new IllegalArgumentException(
+                    purpose + " path normalizes to traversal pattern: " + normalized);
+        }
+
+        return path;
+    }
+
+    private static final Pattern DANGEROUS_CHARS = Pattern.compile("[;&|<>`$()\\n\\r!\"']");
+
+    private String validateExecutablePath(String pathString) {
+        // 1. Basic checks
+        if (pathString == null || pathString.isBlank()) {
+            throw new IllegalArgumentException("Executable path cannot be blank");
+        }
+
+        // 2. Length check (prevent excessive input)
+        if (pathString.length() > 512) {
+            throw new IllegalArgumentException("Executable path too long");
+        }
+
+        // 3. Security check (no backtracking risk)
+        if (DANGEROUS_CHARS.matcher(pathString).find()) {
+            throw new IllegalArgumentException("Executable path contains dangerous characters");
+        }
+
+        Path path = Paths.get(pathString).normalize();
+
+        return path.toString();
+    }
+
+
+    // Helper method to ensure correctness of cut time parameters
+    private void validateEditOptions(EditOptions options) {
+        if (options.cutStartTime() != null && options.cutEndTime() != null && options.cutEndTime() <= options.cutStartTime()) {
+            String errorMessage = String.format(
+                    "Invalid cut times: End time (%.2f) must be strictly greater than start time (%.2f).",
+                    options.cutEndTime(),
+                    options.cutStartTime()
+            );
+            log.warn("EditOptions validation failed: {}", errorMessage);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, errorMessage);
         }
     }
 }

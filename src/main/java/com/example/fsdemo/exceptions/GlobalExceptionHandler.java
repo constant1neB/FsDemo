@@ -58,6 +58,27 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return problemDetail;
     }
 
+    @ExceptionHandler(FfmpegProcessingException.class)
+    public ProblemDetail handleFfmpegProcessingException(FfmpegProcessingException ex, WebRequest request) {
+        // Log the detailed error internally, including stderr if available
+        if (ex.getStderrOutput() != null && !ex.getStderrOutput().isBlank()) {
+            log.error("FFmpeg processing failed for request: {} - FFmpeg stderr:\n{}",
+                    ex.getMessage(), ex.getStderrOutput(), ex);
+        } else {
+            log.error("FFmpeg processing failed for request: {}", ex.getMessage(), ex);
+        }
+
+        // Return a generic error to the client
+        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "Video processing failed. Please check the video format or contact support if the problem persists."
+        );
+        problemDetail.setTitle("Video Processing Error");
+        problemDetail.setInstance(URI.create(request.getDescription(false)));
+        problemDetail.setProperty(TIMESTAMP_PROPERTY, Instant.now());
+        return problemDetail;
+    }
+
     // --- Spring Security Exceptions ---
 
     @ExceptionHandler(AccessDeniedException.class)

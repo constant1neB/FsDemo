@@ -42,17 +42,28 @@ public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
         if (file.isEmpty()) {
             throw new VideoStorageException("Failed to store empty file (storage service check).");
         }
-        if (generatedFilename == null || generatedFilename.isBlank() || generatedFilename.contains("/") || generatedFilename.contains("\\") || generatedFilename.contains("..")) {
+        if (generatedFilename == null || generatedFilename.isBlank()
+                || generatedFilename.contains("/") || generatedFilename.contains("\\") || generatedFilename.contains("..")) {
             throw new VideoStorageException("Invalid generated filename received by storage service: " + generatedFilename);
         }
 
         try {
-            Path destinationFile = this.rootLocation.resolve(generatedFilename)
-                    .normalize().toAbsolutePath();
+            // Resolve and normalize first
+            Path destinationFile = this.rootLocation.resolve(generatedFilename).normalize().toAbsolutePath();
 
-            if (!destinationFile.getParent().equals(this.rootLocation)) {
+            // Ensure the normalized path is still within the root location, and
+            // that the direct parent is the root (prevents storing in subdirectories if not intended)
+            if (!destinationFile.startsWith(this.rootLocation)) {
+                log.error("SECURITY ALERT: Attempt to store file outside root directory.");
                 throw new VideoStorageException(
-                        "Security check failed: Cannot store file outside designated directory structure. Target: " + destinationFile);
+                        "Security check failed: Cannot store file outside designated directory structure.");
+            }
+            // Optional: If you ONLY want files directly in the root, keep this check.
+            // If you might have subdirectories later (e.g., per user), remove this specific parent check.
+            if (!destinationFile.getParent().equals(this.rootLocation)) {
+                log.error("SECURITY ALERT: Attempt to store file in an unexpected subdirectory.");
+                throw new VideoStorageException(
+                        "Security check failed: Storing files in subdirectories is not permitted.");
             }
 
             if (Files.exists(destinationFile)) {
@@ -60,15 +71,16 @@ public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
                 throw new VideoStorageException("File already exists: " + generatedFilename);
             }
 
-            log.debug("Storing file {} to {}", generatedFilename, destinationFile);
             try (var inputStream = file.getInputStream()) {
                 Files.copy(inputStream, destinationFile);
             }
-            log.info("Successfully stored file {} for user {}", generatedFilename, userId);
-            return generatedFilename;
+            log.info("Successfully stored file for user {}", userId);
+            return generatedFilename; // Return only the filename part, assuming it's stored directly in root
 
         } catch (IOException e) {
             throw new VideoStorageException("Failed to store file " + generatedFilename, e);
+        } catch (InvalidPathException e) {
+            throw new VideoStorageException("Invalid generated filename provided: " + generatedFilename, e);
         }
     }
 
@@ -135,9 +147,8 @@ public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
         try {
             Path resolvedPath = this.rootLocation.resolve(storagePath).normalize().toAbsolutePath();
 
-            // Security check: Ensure the resolved path is still within the root location
+            // Ensure the final, normalized, absolute path is still within the root location.
             if (!resolvedPath.startsWith(this.rootLocation)) {
-                log.error("Security check failed: Attempt to access file outside storage root.");
                 throw new VideoStorageException("Security check failed: Cannot access file outside designated directory: " + storagePath);
             }
             return resolvedPath;
