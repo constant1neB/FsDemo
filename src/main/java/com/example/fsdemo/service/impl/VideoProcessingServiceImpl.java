@@ -79,7 +79,7 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
 
     @Override
     @Async
-    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void processVideoEdits(Long videoId, EditOptions options, String username) {
         String txName = TransactionSynchronizationManager.getCurrentTransactionName();
         log.info("[Async][TX:{}] Starting processing check for video ID: {} by user: {}", txName, videoId, username);
