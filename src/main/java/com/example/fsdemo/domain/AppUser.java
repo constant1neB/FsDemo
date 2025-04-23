@@ -6,6 +6,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
+import java.time.Instant;
+
 @Entity
 public class AppUser {
 
@@ -30,21 +32,32 @@ public class AppUser {
 
     @NotBlank(message = "Email cannot be blank")
     @Email(message = "Email must be a well-formed email address")
-    @Column(unique = true)
+    @Column(unique = true) // Make sure email is unique if checking duplicates
     private String email;
 
+    @Column(nullable = false)
+    private boolean verified = false;
+
+    @Column(unique = true)
+    private String verificationToken;
+
+    @Column
+    private Instant verificationTokenExpiryDate;
+
+    // --- Constructors ---
     public AppUser() {
     }
 
     public AppUser(String username, String password, String role, String email) {
-        super();
         this.username = username;
         this.password = password;
         this.role = role;
         this.email = email;
+        this.verified = false; // Explicitly set in constructor too
     }
 
 
+    // Existing Getters/Setters for id, username, password, role, email...
     public Long getId() {
         return id;
     }
@@ -83,5 +96,30 @@ public class AppUser {
 
     public void setEmail(String email) {
         this.email = email;
+    }
+
+
+    public boolean isVerified() { // Getter for boolean often starts with "is"
+        return verified;
+    }
+
+    public void setVerified(boolean verified) { // Setter for verified
+        this.verified = verified;
+    }
+
+    public String getVerificationToken() { // Getter for token
+        return verificationToken;
+    }
+
+    public void setVerificationToken(String verificationToken) { // Setter for token
+        this.verificationToken = verificationToken;
+    }
+
+    public Instant getVerificationTokenExpiryDate() { // Getter for expiry
+        return verificationTokenExpiryDate;
+    }
+
+    public void setVerificationTokenExpiryDate(Instant verificationTokenExpiryDate) { // Setter for expiry
+        this.verificationTokenExpiryDate = verificationTokenExpiryDate;
     }
 }

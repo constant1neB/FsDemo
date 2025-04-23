@@ -3,13 +3,11 @@ package com.example.fsdemo.security;
 import com.example.fsdemo.domain.AppUser;
 import com.example.fsdemo.repository.AppUserRepository;
 import org.springframework.security.core.userdetails.User;
-import org.springframework.security.core.userdetails.User.UserBuilder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
-
-import java.util.Optional;
+import org.springframework.security.authentication.DisabledException;
 
 @Service
 public class UserDetailsServiceImpl implements UserDetailsService {
@@ -21,17 +19,16 @@ public class UserDetailsServiceImpl implements UserDetailsService {
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        Optional<AppUser> user = repository.findByUsername(username);
+        AppUser currentUser = repository.findByUsername(username)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
 
-        UserBuilder builder;
-        if (user.isPresent()) {
-            AppUser currentUser = user.get();
-            builder = User.withUsername(username);
-            builder.password(currentUser.getPassword());
-            builder.roles(currentUser.getRole());
-        } else {
-            throw new UsernameNotFoundException("User not found: " + username);
+        if (!currentUser.isVerified()) {
+            throw new DisabledException("User account is not verified. Please check your email.");
         }
-        return builder.build();
+
+        return User.withUsername(username)
+                .password(currentUser.getPassword())
+                .roles(currentUser.getRole())
+                .build();
     }
 }
