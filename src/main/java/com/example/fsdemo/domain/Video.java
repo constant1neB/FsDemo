@@ -57,6 +57,9 @@ public class Video {
     @Column(nullable = false, length = 20)
     private VideoStatus status = VideoStatus.UPLOADED;
 
+    @Version
+    private Long version;
+
     public enum VideoStatus {
         UPLOADED, // Initial state after successful upload and metadata save
         PROCESSING, // Video editing/transcoding is in progress
