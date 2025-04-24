@@ -14,10 +14,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -28,6 +32,7 @@ public class UserServiceImpl implements UserService {
     private static final String DEFAULT_USER_ROLE = "USER";
     private static final String REGISTRATION_CONFLICT_MESSAGE = "Unable to register with the provided details. Please check your input or try logging in.";
     private static final int VERIFICATION_TOKEN_BYTES = 64;
+    private static final String TOKEN_HASH_ALGORITHM = "SHA-256";
 
     private final AppUserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -55,7 +60,6 @@ public class UserServiceImpl implements UserService {
 
         if (!Objects.equals(registrationRequest.password(), registrationRequest.passwordConfirmation())) {
             log.warn("Registration failed: Passwords do not match for username attempt: {}", registrationRequest.username());
-            // Throw 400 Bad Request for mismatched passwords
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Passwords do not match.");
         }
 
@@ -65,7 +69,7 @@ public class UserServiceImpl implements UserService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, REGISTRATION_CONFLICT_MESSAGE);
         }
 
-        // 3. Check for existing email (Handle verified vs unverified)
+        // 3. Check for existing email
         Optional<AppUser> existingUserOpt = userRepository.findByEmail(registrationRequest.email());
 
         if (existingUserOpt.isPresent()) {
@@ -73,25 +77,34 @@ public class UserServiceImpl implements UserService {
             if (existingUser.isVerified()) {
                 // Email already exists and is verified - Cannot re-register
                 log.warn("Registration failed: Email '{}' already exists and is verified.", registrationRequest.email());
+                throw new ResponseStatusException(HttpStatus.CONFLICT, REGISTRATION_CONFLICT_MESSAGE);
             } else {
-                // Email exists but is NOT verified - DO NOT update. Signal conflict.
-                log.warn("Registration attempt failed: Email '{}' already exists but is unverified. Suggesting user check email or use resend.", registrationRequest.email());
-                // Use the same generic conflict message as duplicate username/verified email
-                // to avoid revealing the verification status of an existing email.
+                // --- FIX APPLIED ---
+                // Email exists but is NOT verified - Update password, generate new token, resend email
+                log.info("Email '{}' exists but is unverified. Updating password and resending verification.", registrationRequest.email());
+                updateUnverifiedUserAndResendVerification(existingUser, registrationRequest.password());
+                // No exception thrown, proceed to return (Controller returns 201 Created)
+                return;
             }
-            throw new ResponseStatusException(HttpStatus.CONFLICT, REGISTRATION_CONFLICT_MESSAGE);
         }
 
+        // 4. Email does not exist, create new user
         createNewUserAndSendVerification(registrationRequest);
     }
 
     @Override
     @Transactional
-    public boolean verifyUser(String token) {
-        Optional<AppUser> userOpt = userRepository.findByVerificationToken(token);
+    public boolean verifyUser(String rawToken) { // Parameter is the raw token from URL
+        if (rawToken == null || rawToken.isBlank()) {
+            log.warn("Verification attempt with blank token.");
+            return false;
+        }
+
+        String hashedToken = hashToken(rawToken);
+        Optional<AppUser> userOpt = userRepository.findByVerificationTokenHash(hashedToken);
 
         if (userOpt.isEmpty()) {
-            log.warn("Verification failed: Token not found.");
+            log.warn("Verification failed: Token hash not found.");
             return false; // Indicate failure: Token invalid
         }
 
@@ -99,9 +112,9 @@ public class UserServiceImpl implements UserService {
 
         // Idempotency: If already verified, clear token info and return success.
         if (user.isVerified()) {
-            log.info("Verification attempt for already verified user: {}. Treating as success.", user.getUsername()); // Changed log level
-            if (user.getVerificationToken() != null) {
-                user.setVerificationToken(null);
+            log.info("Verification attempt for already verified user: {}. Treating as success.", user.getUsername());
+            if (user.getVerificationTokenHash() != null) {
+                user.setVerificationTokenHash(null); // Clear hash
                 user.setVerificationTokenExpiryDate(null);
                 userRepository.save(user);
             }
@@ -117,7 +130,7 @@ public class UserServiceImpl implements UserService {
 
         // Verification Success!
         user.setVerified(true);
-        user.setVerificationToken(null); // Invalidate the token
+        user.setVerificationTokenHash(null); // Invalidate the token hash
         user.setVerificationTokenExpiryDate(null);
         userRepository.save(user);
 
@@ -142,23 +155,44 @@ public class UserServiceImpl implements UserService {
             return; // Do nothing
         }
 
-        // User exists and is not verified, generate new token and send
+        // --- FIX APPLIED --- User exists and is not verified, generate new token/hash and send
         log.info("Resending verification email for user: {}", user.getUsername());
-        String token = generateSecureToken();
+        String rawToken = generateSecureToken();
+        String hashedToken = hashToken(rawToken);
         Instant expiryDate = Instant.now().plus(Duration.parse(tokenDurationString));
 
-        user.setVerificationToken(token);
+        user.setVerificationTokenHash(hashedToken); // Store hash
         user.setVerificationTokenExpiryDate(expiryDate);
         AppUser savedUser = userRepository.save(user);
 
-        // Send email asynchronously
-        triggerVerificationEmail(savedUser, token);
+        // Send the *raw* token in the email asynchronously
+        triggerVerificationEmail(savedUser, rawToken);
     }
 
-    // Helper Methods
+    // --- Helper Methods ---
 
     /**
-     * Creates a new user, saves them, and triggers the verification email.
+     * Updates an existing unverified user's password, generates a new verification token/hash/expiry,
+     * saves the user, and triggers the verification email.
+     */
+    private void updateUnverifiedUserAndResendVerification(AppUser user, String newRawPassword) {
+        user.setPassword(passwordEncoder.encode(newRawPassword)); // Update password
+
+        String rawToken = generateSecureToken();
+        String hashedToken = hashToken(rawToken);
+        Instant expiryDate = Instant.now().plus(Duration.parse(tokenDurationString));
+
+        user.setVerificationTokenHash(hashedToken); // Store new hash
+        user.setVerificationTokenExpiryDate(expiryDate); // Update expiry
+
+        AppUser savedUser = userRepository.save(user);
+        log.info("Updated unverified user '{}' (ID: {}). Resending verification.", savedUser.getUsername(), savedUser.getId());
+
+        triggerVerificationEmail(savedUser, rawToken); // Send new raw token
+    }
+
+    /**
+     * Creates a new user, saves them, generates token/hash/expiry, and triggers the verification email.
      */
     private void createNewUserAndSendVerification(RegistrationRequest registrationRequest) {
         String hashedPassword = passwordEncoder.encode(registrationRequest.password());
@@ -169,17 +203,19 @@ public class UserServiceImpl implements UserService {
                 registrationRequest.email()
         );
 
-        String token = generateSecureToken();
+        // --- FIX APPLIED --- Generate raw token, hash it, store hash
+        String rawToken = generateSecureToken();
+        String hashedToken = hashToken(rawToken);
         Instant expiryDate = Instant.now().plus(Duration.parse(tokenDurationString));
 
-        newUser.setVerificationToken(token);
+        newUser.setVerificationTokenHash(hashedToken); // Store hash
         newUser.setVerificationTokenExpiryDate(expiryDate);
         newUser.setVerified(false); // Ensure it's false
 
         AppUser savedUser = userRepository.save(newUser);
         log.info("Successfully registered new user '{}' with ID: {}. Verification pending.", savedUser.getUsername(), savedUser.getId());
 
-        triggerVerificationEmail(savedUser, token);
+        triggerVerificationEmail(savedUser, rawToken); // Send raw token
     }
 
     /**
@@ -188,15 +224,32 @@ public class UserServiceImpl implements UserService {
     private String generateSecureToken() {
         byte[] randomBytes = new byte[VERIFICATION_TOKEN_BYTES];
         secureRandom.nextBytes(randomBytes);
+        // Use URL-safe encoding without padding
         return Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
     }
 
     /**
+     * Hashes the provided token using SHA-256 and returns the hex representation.
+     * Throws IllegalStateException if SHA-256 is not available.
+     */
+    private static String hashToken(String token) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance(TOKEN_HASH_ALGORITHM);
+            byte[] hashBytes = digest.digest(token.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hashBytes);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(TOKEN_HASH_ALGORITHM + " algorithm not available", e);
+        }
+    }
+
+
+    /**
      * Triggers the asynchronous email sending.
      */
-    private void triggerVerificationEmail(AppUser user, String token) {
+    private void triggerVerificationEmail(AppUser user, String rawToken) { // Takes raw token
         try {
-            emailService.sendVerificationEmail(user, token, appBaseUrl);
+            // Pass the raw token to the email service
+            emailService.sendVerificationEmail(user, rawToken, appBaseUrl);
         } catch (Exception e) {
             log.error("Error triggering verification email for user {} (ID: {}).", user.getUsername(), user.getId(), e);
             // Consider adding more robust error handling here if email failure is critical
