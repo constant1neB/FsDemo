@@ -1,4 +1,4 @@
-package com.example.fsdemo;
+package com.example.fsdemo.web;
 
 import com.example.fsdemo.service.UserService;
 import com.example.fsdemo.web.dto.RegistrationRequest;
