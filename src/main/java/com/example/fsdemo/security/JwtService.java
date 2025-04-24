@@ -63,21 +63,29 @@ public class JwtService {
     private void initializeKey() {
         log.debug("Attempting to initialize JWT Key from property/environment variable.");
         if (!StringUtils.hasText(this.base64Secret)) {
-            log.error("CRITICAL: JWT Secret Key (jwt.secret.key.base64 or JWT_SECRET_KEY_BASE64 env var) is missing or empty!");
-            throw new IllegalArgumentException("JWT Secret Key (jwt.secret.key.base64) must be provided via properties or environment variable (JWT_SECRET_KEY_BASE64)");
+            log.error("CRITICAL: JWT Secret Key is missing or empty!");
+            throw new IllegalArgumentException("JWT Secret Key (jwt.secret.key.base64) must be provided...");
         }
 
+        byte[] decodedKey;
         try {
-            byte[] decodedKey = Base64.getDecoder().decode(this.base64Secret);
-            if (decodedKey.length < 32) {
-                log.error("CRITICAL: Provided JWT secret key is too short ({} bytes). Must be at least 256 bits (32 bytes).", decodedKey.length);
-                throw new IllegalArgumentException("JWT Secret key must be at least 256 bits (32 bytes)");
-            }
-            this.key = Keys.hmacShaKeyFor(decodedKey);
-            log.info("JWT Secret Key initialized successfully.");
+            // 1. Try decoding first
+            decodedKey = Base64.getDecoder().decode(this.base64Secret);
         } catch (IllegalArgumentException e) {
+            // 2. Catch ONLY Base64 decoding errors here
             throw new IllegalArgumentException("Invalid Base64 encoding for JWT secret key (jwt.secret.key.base64)", e);
         }
+
+        // 3. Check length AFTER successful decoding
+        if (decodedKey.length < 32) {
+            log.error("CRITICAL: Provided JWT secret key is too short. Must be at least 256 bits (32 bytes).");
+            // Throw the CORRECT exception if length is the issue
+            throw new IllegalArgumentException("JWT Secret key must be at least 256 bits (32 bytes)");
+        }
+
+        // 4. If decoding and length check passed, create the key
+        this.key = Keys.hmacShaKeyFor(decodedKey);
+        log.info("JWT Secret Key initialized successfully.");
     }
 
     /**
