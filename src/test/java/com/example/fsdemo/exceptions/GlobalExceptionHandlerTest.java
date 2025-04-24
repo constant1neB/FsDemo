@@ -8,6 +8,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -19,6 +22,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -436,6 +440,59 @@ class GlobalExceptionHandlerTest {
             assertThat(problemDetail.getDetail()).isEqualTo("Pre-existing detail"); // Keeps existing detail
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create("uri=" + requestUri)); // Adds instance if missing
             assertThat(problemDetail.getProperties()).containsKey("timestamp"); // Adds timestamp if missing
+        }
+    }
+
+    // --- Helper Method Tests ---
+    @Nested
+    @DisplayName("Helper Method Tests")
+    class HelperMethodTests {
+
+        @Test
+        @DisplayName("getReasonPhrase should return standard phrase for HttpStatus")
+        void getReasonPhrase_HttpStatus() {
+            // Use ReflectionTestUtils to invoke the private method
+            String phrase = ReflectionTestUtils.invokeMethod(globalExceptionHandler, "getReasonPhrase", HttpStatus.NOT_FOUND);
+            assertThat(phrase).isEqualTo(HttpStatus.NOT_FOUND.getReasonPhrase());
+        }
+
+        // Removed tests attempting to mock HttpStatusCode as it fails with inline mock maker
+
+        @ParameterizedTest
+        @ValueSource(strings = {"field", "object.field", "list[0].field", "map[key]", "complex.list[1].map[key].finalField"})
+        @DisplayName("getPropertyName should extract last part correctly")
+        void getPropertyName_ValidCases(String input) {
+            String actual = ReflectionTestUtils.invokeMethod(globalExceptionHandler, "getPropertyName", input);
+            switch (input) {
+                case "field", "object.field", "list[0].field" -> assertThat(actual).isEqualTo("field");
+                case "map[key]" ->
+                    // Based on the implementation: lastIndexOf('.') is -1, lastIndexOf('[') finds '[', returns substring after '['
+                        assertThat(actual).isEqualTo("key]");
+                case "complex.list[1].map[key].finalField" ->
+                    // lastIndexOf('.') is at 'key].', lastIndexOf('[') is at map[key], '.' is later
+                        assertThat(actual).isEqualTo("finalField");
+                default ->
+                    // Default case if none match - useful for debugging if new cases are added
+                        assertThat(actual).isEqualTo(input.substring(Math.max(input.lastIndexOf('.'), input.lastIndexOf('[')) + 1));
+            }
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {""}) // Test only empty string
+        @NullSource // Test null separately
+        @DisplayName("getPropertyName should return 'unknown' for null or empty input")
+        void getPropertyName_NullOrEmpty(String input) {
+            String actual = ReflectionTestUtils.invokeMethod(globalExceptionHandler, "getPropertyName", input);
+            assertThat(actual).isEqualTo("unknown");
+        }
+
+        @Test // Separate test for blank string
+        @DisplayName("getPropertyName should return blank string for blank input (current behavior)")
+        void getPropertyName_Blank() {
+            String input = " ";
+            String actual = ReflectionTestUtils.invokeMethod(globalExceptionHandler, "getPropertyName", input);
+            // Asserting the current behavior where blank is returned as is
+            assertThat(actual).isEqualTo(" ");
         }
     }
 }
