@@ -133,6 +133,7 @@ class VideoControllerTest {
                 TEST_EMAIL
         );
         user.setId(1L);
+        user.setVerified(true);
         return user;
     }
 
@@ -154,7 +155,10 @@ class VideoControllerTest {
     }
 
     private void authenticateAndGetTokenAndCookie() throws Exception {
-        MvcResult result = mockMvc.perform(post("/login")
+
+        given(appUserRepository.findByUsername(TEST_USERNAME)).willReturn(Optional.of(testUser));
+
+        MvcResult result = mockMvc.perform(post("/api/auth/login") // Corrected path from SecurityConfig
                         .content(String.format("{\"username\":\"%s\", \"password\":\"%s\"}", TEST_USERNAME, TEST_PASSWORD))
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
