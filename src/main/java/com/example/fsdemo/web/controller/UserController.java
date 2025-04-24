@@ -4,6 +4,7 @@ import com.example.fsdemo.domain.AccountCredentials;
 import com.example.fsdemo.security.JwtService;
 import com.example.fsdemo.service.UserService;
 import com.example.fsdemo.web.dto.RegistrationRequest;
+import com.example.fsdemo.web.dto.ResendVerificationRequest;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,9 +38,10 @@ public class UserController {
     }
 
     @PostMapping("/register")
-    @ResponseStatus(HttpStatus.CREATED) // Keep annotation for clarity
+    @ResponseStatus(HttpStatus.CREATED)
     public ResponseEntity<Object> registerUser(@Valid @RequestBody RegistrationRequest registrationRequest) {
         userService.registerNewUser(registrationRequest);
+        // Return 201 Created even if it was a re-verification trigger for simplicity client-side
         return ResponseEntity.status(HttpStatus.CREATED).build();
     }
 
@@ -48,11 +50,21 @@ public class UserController {
         boolean success = userService.verifyUser(token);
 
         if (success) {
+            // Consider redirecting to a frontend page instead of just returning text
             return ResponseEntity.ok("Email successfully verified! You can now log in.");
         } else {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or expired verification token.");
+            // Provide a more user-friendly error page/message on the frontend if possible
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or expired verification token. Please try registering again or request a new verification email.");
         }
     }
+
+    @PostMapping("/resend-verification")
+    public ResponseEntity<Void> resendVerificationEmail(@Valid @RequestBody ResendVerificationRequest resendRequest) {
+        log.info("Received request to resend verification email for: {}", resendRequest.email());
+        userService.resendVerificationEmail(resendRequest.email());
+        return ResponseEntity.accepted().build();
+    }
+
 
     @PostMapping("/login")
     public ResponseEntity<Object> login(@Valid @RequestBody AccountCredentials creds) {
@@ -77,9 +89,10 @@ public class UserController {
         // 5. Create Hardened Fingerprint Cookie
         ResponseCookie fingerprintCookie = ResponseCookie.from(JwtService.FINGERPRINT_COOKIE_NAME, userFingerprint)
                 .httpOnly(true)
-                .secure(true)
+                .secure(true) // Ensure this is true for production
                 .sameSite("Strict")
-                .path("/api")
+                .path("/api") // Make sure path matches API requests needing the cookie
+                // .maxAge(Duration.ofSeconds(...)) // Consider setting maxAge same as JWT expiry
                 .build();
         log.debug("Setting fingerprint cookie for user: {}", username);
 
