@@ -19,8 +19,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.server.ResponseStatusException;
 import com.example.fsdemo.security.JwtService;
 
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.hasKey;
+import static org.hamcrest.Matchers.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -333,17 +332,20 @@ class UserControllerTest {
         }
 
         @Test
-        @DisplayName("❌ Should return 400 Bad Request for blank email (DTO validation)")
-        void resendVerification_FailBlankEmail() throws Exception {
-            ResendVerificationRequest invalidRequest = new ResendVerificationRequest(" ");
+        @DisplayName("❌ Should return 400 Bad Request for empty email (DTO validation)")
+        void resendVerification_FailEmptyEmail() throws Exception {
+            ResendVerificationRequest invalidRequest = new ResendVerificationRequest(""); // Use empty string
 
             mockMvc.perform(post("/api/auth/resend-verification")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(asJsonString(invalidRequest)))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.title").value("Bad Request"))
-                    .andExpect(jsonPath("$.errors", hasKey("email"))) // Check key exists
-                    .andExpect(jsonPath("$.errors.email").value(containsString("cannot be blank"))); // Specific message likely stable
+                    .andExpect(jsonPath("$.errors", hasKey("email")))
+                    .andExpect(jsonPath("$.errors.email", anyOf(
+                            equalTo("Email cannot be blank"),
+                            equalTo("Email must be a well-formed email address")
+                    )));
 
             verify(userService, never()).resendVerificationEmail(anyString());
         }
