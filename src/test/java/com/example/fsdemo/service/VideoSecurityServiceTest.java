@@ -1,4 +1,4 @@
-package com.example.fsdemo;
+package com.example.fsdemo.service;
 
 import com.example.fsdemo.domain.AppUser;
 import com.example.fsdemo.domain.Video;

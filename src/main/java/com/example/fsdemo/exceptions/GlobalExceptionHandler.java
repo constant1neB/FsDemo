@@ -52,7 +52,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 HttpStatus.INTERNAL_SERVER_ERROR,
                 "Failed to process video storage operation. Please contact support if the problem persists."
         );
-        problemDetail.setTitle("Video Storage Error");
+        problemDetail.setTitle(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase()); // Use standard phrase
         problemDetail.setInstance(URI.create(request.getDescription(false)));
         problemDetail.setProperty(TIMESTAMP_PROPERTY, Instant.now());
         return problemDetail;
@@ -73,7 +73,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 HttpStatus.INTERNAL_SERVER_ERROR,
                 "Video processing failed. Please check the video format or contact support if the problem persists."
         );
-        problemDetail.setTitle("Video Processing Error");
+        problemDetail.setTitle(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase()); // Use standard phrase
         problemDetail.setInstance(URI.create(request.getDescription(false)));
         problemDetail.setProperty(TIMESTAMP_PROPERTY, Instant.now());
         return problemDetail;
@@ -91,7 +91,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 HttpStatus.FORBIDDEN,
                 "Access Denied. You do not have sufficient permissions to access this resource."
         );
-        problemDetail.setTitle("Forbidden");
+        problemDetail.setTitle(HttpStatus.FORBIDDEN.getReasonPhrase()); // Use standard phrase
         problemDetail.setInstance(URI.create(request.getDescription(false)));
         problemDetail.setProperty(TIMESTAMP_PROPERTY, Instant.now());
         return problemDetail;
@@ -107,7 +107,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 HttpStatus.UNAUTHORIZED,
                 "Authentication failed. Please check your credentials or log in."
         );
-        problemDetail.setTitle("Unauthorized");
+        problemDetail.setTitle(HttpStatus.UNAUTHORIZED.getReasonPhrase()); // Use standard phrase
         problemDetail.setInstance(URI.create(request.getDescription(false)));
         problemDetail.setProperty(TIMESTAMP_PROPERTY, Instant.now());
         return problemDetail;
@@ -129,7 +129,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 ));
 
         ProblemDetail problemDetail = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
-        problemDetail.setTitle("Validation Failed");
+        problemDetail.setTitle(HttpStatus.BAD_REQUEST.getReasonPhrase()); // Use standard phrase
         problemDetail.setDetail("Input validation failed. Check the 'errors' field for details.");
         problemDetail.setProperty(ERRORS_PROPERTY, errors);
         problemDetail.setInstance(URI.create(request.getDescription(false)));
@@ -158,7 +158,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         });
 
         ProblemDetail problemDetail = ProblemDetail.forStatus(status);
-        problemDetail.setTitle("Validation Failed");
+        // Use standard reason phrase if available, fallback otherwise
+        problemDetail.setTitle(getReasonPhrase(status, "Validation Failed"));
         problemDetail.setDetail("Request body validation failed. Check the 'errors' field for details.");
         problemDetail.setProperty(ERRORS_PROPERTY, errors);
         problemDetail.setInstance(URI.create(request.getDescription(false)));
@@ -178,7 +179,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                     request.getDescription(false), ex.getMessage());
         }
         ProblemDetail problemDetail = ProblemDetail.forStatus(status);
-        problemDetail.setTitle("Method Not Allowed");
+        problemDetail.setTitle(getReasonPhrase(status, "Method Not Allowed")); // Use standard phrase
         problemDetail.setDetail(ex.getMessage());
         problemDetail.setInstance(URI.create(request.getDescription(false)));
         problemDetail.setProperty(TIMESTAMP_PROPERTY, Instant.now());
@@ -209,7 +210,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                     request.getDescription(false), ex.getMessage());
         }
         ProblemDetail problemDetail = ProblemDetail.forStatus(status);
-        problemDetail.setTitle("Unsupported Media Type");
+        problemDetail.setTitle(getReasonPhrase(status, "Unsupported Media Type")); // Use standard phrase
         problemDetail.setDetail(ex.getMessage());
         problemDetail.setInstance(URI.create(request.getDescription(false)));
         problemDetail.setProperty(TIMESTAMP_PROPERTY, Instant.now());
@@ -232,7 +233,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                     request.getDescription(false), ex.getMessage());
         }
         ProblemDetail problemDetail = ProblemDetail.forStatus(status);
-        problemDetail.setTitle("Missing Request Parameter");
+        problemDetail.setTitle(getReasonPhrase(status, "Missing Request Parameter")); // Use standard phrase
         problemDetail.setDetail(ex.getMessage());
         problemDetail.setInstance(URI.create(request.getDescription(false)));
         problemDetail.setProperty(TIMESTAMP_PROPERTY, Instant.now());
@@ -246,7 +247,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                     request.getDescription(false), ex.getStatusCode(), ex.getReason());
         }
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(ex.getStatusCode(), ex.getReason());
-        problemDetail.setTitle(ex.getStatusCode().isError() ? "Request Error" : "Request Information");
+        // CORRECTED: Use standard HTTP reason phrase for the title if possible
+        problemDetail.setTitle(getReasonPhrase(ex.getStatusCode()));
         problemDetail.setInstance(URI.create(request.getDescription(false)));
         problemDetail.setProperty(TIMESTAMP_PROPERTY, Instant.now());
         return problemDetail;
@@ -266,7 +268,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 HttpStatus.INTERNAL_SERVER_ERROR,
                 "An unexpected internal error occurred. Please try again later or contact support."
         );
-        problemDetail.setTitle("Internal Server Error");
+        problemDetail.setTitle(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase());
         problemDetail.setInstance(URI.create(request.getDescription(false)));
         problemDetail.setProperty(TIMESTAMP_PROPERTY, Instant.now());
         return problemDetail;
@@ -287,7 +289,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                     HttpStatus.PAYLOAD_TOO_LARGE,
                     "Maximum upload size exceeded. " + maxEx.getLocalizedMessage()
             );
-            problemDetail.setTitle("File Too Large");
+            // CORRECTED: HttpStatus.PAYLOAD_TOO_LARGE is an HttpStatus enum
+            problemDetail.setTitle(HttpStatus.PAYLOAD_TOO_LARGE.getReasonPhrase());
             problemDetail.setInstance(URI.create(request.getDescription(false)));
             problemDetail.setProperty(TIMESTAMP_PROPERTY, Instant.now());
             return new ResponseEntity<>(problemDetail, headers, HttpStatus.PAYLOAD_TOO_LARGE);
@@ -304,12 +307,17 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             if (problemDetailToReturn.getInstance() == null) {
                 problemDetailToReturn.setInstance(URI.create(request.getDescription(false)));
             }
+            // Ensure title is set if missing, using standard phrase if possible
+            if (problemDetailToReturn.getTitle() == null) {
+                problemDetailToReturn.setTitle(getReasonPhrase(statusCode));
+            }
         } else {
             // Create a new basic ProblemDetail
             log.warn("Creating basic ProblemDetail in handleExceptionInternal for exception type {}: {}",
                     ex.getClass().getSimpleName(), ex.getMessage());
             problemDetailToReturn = ProblemDetail.forStatus(statusCode);
-            problemDetailToReturn.setTitle(statusCode.isError() ? "Request Error" : "Request Information");
+            // CORRECTED: Use standard reason phrase for title if possible
+            problemDetailToReturn.setTitle(getReasonPhrase(statusCode));
             String detail = (ex.getCause() != null) ? ex.getCause().getMessage() : ex.getMessage();
             problemDetailToReturn.setDetail(detail);
             problemDetailToReturn.setInstance(URI.create(request.getDescription(false)));
@@ -330,5 +338,24 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         int lastBracket = propertyPath.lastIndexOf('[');
         int lastSeparator = Math.max(lastDot, lastBracket);
         return (lastSeparator == -1) ? propertyPath : propertyPath.substring(lastSeparator + 1);
+    }
+
+    /**
+     * Helper to safely get the standard reason phrase or a fallback.
+     */
+    private String getReasonPhrase(HttpStatusCode statusCode) {
+        return getReasonPhrase(statusCode, "Status"); // Default fallback prefix
+    }
+
+    /**
+     * Helper to safely get the standard reason phrase or a specific fallback title.
+     */
+    private String getReasonPhrase(HttpStatusCode statusCode, String fallbackTitle) {
+        if (statusCode instanceof HttpStatus httpStatus) {
+            return httpStatus.getReasonPhrase();
+        } else {
+            // Fallback for non-standard HttpStatusCode implementations
+            return fallbackTitle;
+        }
     }
 }
