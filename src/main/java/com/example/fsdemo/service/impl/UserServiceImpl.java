@@ -105,7 +105,6 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public boolean verifyUser(String token) {
-        log.debug("Attempting verification with token: {}", token);
         Optional<AppUser> userOpt = userRepository.findByVerificationToken(token);
 
         if (userOpt.isEmpty()) {
@@ -117,7 +116,6 @@ public class UserServiceImpl implements UserService {
 
         if (user.isVerified()) {
             log.warn("Verification attempt for already verified user: {}", user.getUsername());
-            // Invalidate the token anyway for cleanup, treat as success as they are verified.
             user.setVerificationToken(null);
             user.setVerificationTokenExpiryDate(null);
             userRepository.save(user);
@@ -127,7 +125,6 @@ public class UserServiceImpl implements UserService {
         // Check expiry
         if (user.getVerificationTokenExpiryDate() == null || user.getVerificationTokenExpiryDate().isBefore(Instant.now())) {
             log.warn("Verification failed: Token expired for user: {}", user.getUsername());
-            // Optionally: Add logic here to delete the user or allow resend token functionality
             return false; // Indicate failure: Token expired
         }
 
