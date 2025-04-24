@@ -32,14 +32,14 @@ public class AppUser {
 
     @NotBlank(message = "Email cannot be blank")
     @Email(message = "Email must be a well-formed email address")
-    @Column(unique = true) // Make sure email is unique if checking duplicates
+    @Column(unique = true)
     private String email;
 
     @Column(nullable = false)
     private boolean verified = false;
 
-    @Column(unique = true)
-    private String verificationToken;
+    @Column(unique = true, length = 64)
+    private String verificationTokenHash;
 
     @Column
     private Instant verificationTokenExpiryDate;
@@ -53,11 +53,9 @@ public class AppUser {
         this.password = password;
         this.role = role;
         this.email = email;
-        this.verified = false; // Explicitly set in constructor too
+        this.verified = false;
     }
 
-
-    // Existing Getters/Setters for id, username, password, role, email...
     public Long getId() {
         return id;
     }
@@ -103,12 +101,12 @@ public class AppUser {
         this.verified = verified;
     }
 
-    public String getVerificationToken() { // Getter for token
-        return verificationToken;
+    public String getVerificationTokenHash() {
+        return verificationTokenHash;
     }
 
-    public void setVerificationToken(String verificationToken) { // Setter for token
-        this.verificationToken = verificationToken;
+    public void setVerificationTokenHash(String verificationTokenHash) {
+        this.verificationTokenHash = verificationTokenHash;
     }
 
     public Instant getVerificationTokenExpiryDate() { // Getter for expiry
