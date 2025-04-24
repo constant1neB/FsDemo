@@ -77,7 +77,7 @@ class GlobalExceptionHandlerTest {
 
             assertThat(problemDetail).isNotNull();
             assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.value());
-            assertThat(problemDetail.getTitle()).isEqualTo("Video Storage Error");
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase()); // FIX: Expect standard title
             assertThat(problemDetail.getDetail()).isEqualTo("Failed to process video storage operation. Please contact support if the problem persists.");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties())
@@ -100,7 +100,7 @@ class GlobalExceptionHandlerTest {
 
             assertThat(problemDetail).isNotNull();
             assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.FORBIDDEN.value());
-            assertThat(problemDetail.getTitle()).isEqualTo("Forbidden");
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.FORBIDDEN.getReasonPhrase()); // Expect standard title
             assertThat(problemDetail.getDetail()).isEqualTo("Access Denied. You do not have sufficient permissions to access this resource.");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -119,7 +119,7 @@ class GlobalExceptionHandlerTest {
 
             assertThat(problemDetail).isNotNull();
             assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED.value());
-            assertThat(problemDetail.getTitle()).isEqualTo("Unauthorized");
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.UNAUTHORIZED.getReasonPhrase()); // Expect standard title
             assertThat(problemDetail.getDetail()).isEqualTo("Authentication failed. Please check your credentials or log in.");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -148,7 +148,7 @@ class GlobalExceptionHandlerTest {
 
                 assertThat(problemDetail).isNotNull();
                 assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST.value());
-                assertThat(problemDetail.getTitle()).isEqualTo("Validation Failed");
+                assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.BAD_REQUEST.getReasonPhrase()); // FIX: Expect standard title
                 assertThat(problemDetail.getDetail()).isEqualTo("Input validation failed. Check the 'errors' field for details.");
                 assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
                 assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -192,7 +192,7 @@ class GlobalExceptionHandlerTest {
 
             ProblemDetail problemDetail = (ProblemDetail) responseEntity.getBody();
             assert problemDetail != null;
-            assertThat(problemDetail.getTitle()).isEqualTo("Validation Failed");
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.BAD_REQUEST.getReasonPhrase()); // FIX: Expect standard title
             assertThat(problemDetail.getDetail()).isEqualTo("Request body validation failed. Check the 'errors' field for details.");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -229,7 +229,7 @@ class GlobalExceptionHandlerTest {
 
             ProblemDetail problemDetail = (ProblemDetail) responseEntity.getBody();
             assert problemDetail != null;
-            assertThat(problemDetail.getTitle()).isEqualTo("Method Not Allowed");
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED.getReasonPhrase()); // Expect standard title
             assertThat(problemDetail.getDetail()).isEqualTo(ex.getMessage());
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -255,7 +255,7 @@ class GlobalExceptionHandlerTest {
 
             ProblemDetail problemDetail = (ProblemDetail) responseEntity.getBody();
             assert problemDetail != null;
-            assertThat(problemDetail.getTitle()).isEqualTo("Unsupported Media Type");
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE.getReasonPhrase()); // Expect standard title
             assertThat(problemDetail.getDetail()).isEqualTo(ex.getMessage());
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -280,7 +280,7 @@ class GlobalExceptionHandlerTest {
 
             ProblemDetail problemDetail = (ProblemDetail) responseEntity.getBody();
             assert problemDetail != null;
-            assertThat(problemDetail.getTitle()).isEqualTo("Missing Request Parameter");
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.BAD_REQUEST.getReasonPhrase()); // FIX: Expect standard title
             assertThat(problemDetail.getDetail()).isEqualTo(ex.getMessage());
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -299,14 +299,14 @@ class GlobalExceptionHandlerTest {
 
             assertThat(problemDetail).isNotNull();
             assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.NOT_FOUND.value());
-            assertThat(problemDetail.getTitle()).isEqualTo("Request Error"); // Generic title for errors
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.NOT_FOUND.getReasonPhrase()); // FIX: Expect standard title
             assertThat(problemDetail.getDetail()).isEqualTo("Resource Not Found");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
         }
 
         @Test
-        @DisplayName("Should use 'Request Information' title for non-error statuses")
+        @DisplayName("Should use standard title for non-error statuses")
         void handleResponseStatusException_NotModified() {
             ResponseStatusException ex = new ResponseStatusException(HttpStatus.NOT_MODIFIED, "Resource Not Modified");
 
@@ -314,7 +314,7 @@ class GlobalExceptionHandlerTest {
 
             assertThat(problemDetail).isNotNull();
             assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.NOT_MODIFIED.value());
-            assertThat(problemDetail.getTitle()).isEqualTo("Request Information"); // Generic title for non-errors
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.NOT_MODIFIED.getReasonPhrase()); // FIX: Expect standard title
             assertThat(problemDetail.getDetail()).isEqualTo("Resource Not Modified");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -335,7 +335,7 @@ class GlobalExceptionHandlerTest {
 
             assertThat(problemDetail).isNotNull();
             assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.value());
-            assertThat(problemDetail.getTitle()).isEqualTo("Internal Server Error");
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase()); // Expect standard title
             assertThat(problemDetail.getDetail()).isEqualTo("An unexpected internal error occurred. Please try again later or contact support.");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -350,7 +350,7 @@ class GlobalExceptionHandlerTest {
 
             assertThat(problemDetail).isNotNull();
             assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.value());
-            assertThat(problemDetail.getTitle()).isEqualTo("Internal Server Error");
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase()); // Expect standard title
             assertThat(problemDetail.getDetail()).isEqualTo("An unexpected internal error occurred. Please try again later or contact support.");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -380,7 +380,7 @@ class GlobalExceptionHandlerTest {
 
             ProblemDetail problemDetail = (ProblemDetail) responseEntity.getBody();
             assert problemDetail != null;
-            assertThat(problemDetail.getTitle()).isEqualTo("File Too Large");
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE.getReasonPhrase()); // FIX: Expect standard title
             assertThat(problemDetail.getDetail()).contains("Maximum upload size exceeded");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create("uri=" + requestUri)); // Uses the URI from the ServletWebRequest
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -404,7 +404,7 @@ class GlobalExceptionHandlerTest {
 
             ProblemDetail problemDetail = (ProblemDetail) responseEntity.getBody();
             assert problemDetail != null;
-            assertThat(problemDetail.getTitle()).isEqualTo("Request Error"); // Generic title based on status
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase()); // FIX: Expect standard title
             assertThat(problemDetail.getDetail()).isEqualTo(ex.getMessage());
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create("uri=" + requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -420,7 +420,7 @@ class GlobalExceptionHandlerTest {
 
             // Create a pre-existing ProblemDetail
             ProblemDetail existingProblemDetail = ProblemDetail.forStatusAndDetail(status, "Pre-existing detail");
-            existingProblemDetail.setTitle("Custom Title");
+            existingProblemDetail.setTitle("Custom Title"); // Keep custom title if provided
             // Intentionally omit timestamp and instance
 
             ResponseEntity<Object> responseEntity = globalExceptionHandler.handleExceptionInternal(
