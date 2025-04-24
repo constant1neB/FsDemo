@@ -202,7 +202,7 @@ public class UserServiceImpl implements UserService {
      * Hashes the provided token using SHA-256 and returns the hex representation.
      * Throws IllegalStateException if SHA-256 is not available.
      */
-    private static String hashToken(String token) {
+    public static String hashToken(String token) {
         try {
             MessageDigest digest = MessageDigest.getInstance(TOKEN_HASH_ALGORITHM);
             byte[] hashBytes = digest.digest(token.getBytes(StandardCharsets.UTF_8));
