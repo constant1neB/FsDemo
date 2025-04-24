@@ -1,7 +1,7 @@
 package com.example.fsdemo.service;
 
-import com.example.fsdemo.domain.AppUser;
 import com.example.fsdemo.web.dto.RegistrationRequest;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Service interface for managing user-related operations,
@@ -18,10 +18,9 @@ public interface UserService {
      * the password and resends the verification email.
      *
      * @param registrationRequest DTO containing the new user's details (username, email, password, etc.).
-     * @return The newly created or updated AppUser entity (potentially without sensitive info like password hash).
-     * @throws org.springframework.web.server.ResponseStatusException if validation fails (e.g., duplicate username, duplicate email for *verified* user).
+     * @throws ResponseStatusException if validation fails (e.g., duplicate username, duplicate email for *verified* user).
      */
-    AppUser registerNewUser(RegistrationRequest registrationRequest);
+    void registerNewUser(RegistrationRequest registrationRequest);
 
     /**
      * Verifies a user's email address using the provided verification token.

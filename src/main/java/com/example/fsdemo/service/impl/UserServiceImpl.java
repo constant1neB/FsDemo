@@ -18,6 +18,7 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Objects;
 import java.util.Optional;
 
 @Service
@@ -25,7 +26,7 @@ public class UserServiceImpl implements UserService {
 
     private static final Logger log = LoggerFactory.getLogger(UserServiceImpl.class);
     private static final String DEFAULT_USER_ROLE = "USER";
-    private static final String REGISTRATION_CONFLICT_MESSAGE = "Unable to register with the provided details.";
+    private static final String REGISTRATION_CONFLICT_MESSAGE = "Unable to register with the provided details. Please check your input or try logging in.";
     private static final int VERIFICATION_TOKEN_BYTES = 64;
 
     private final AppUserRepository userRepository;
@@ -37,7 +38,7 @@ public class UserServiceImpl implements UserService {
     private String appBaseUrl;
 
     @Value("${app.verification.token.duration}")
-    private String tokenDurationString; // Keep using ISO-8601 duration format (e.g., PT24H)
+    private String tokenDurationString;
 
     public UserServiceImpl(AppUserRepository userRepository,
                            PasswordEncoder passwordEncoder,
@@ -49,10 +50,14 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
-    public AppUser registerNewUser(RegistrationRequest registrationRequest) {
+    public void registerNewUser(RegistrationRequest registrationRequest) {
         log.info("Attempting registration for username: {}", registrationRequest.username());
 
-        // 1. Password confirmation check removed - Rely on DTO validation (@Valid) for field constraints.
+        if (!Objects.equals(registrationRequest.password(), registrationRequest.passwordConfirmation())) {
+            log.warn("Registration failed: Passwords do not match for username attempt: {}", registrationRequest.username());
+            // Throw 400 Bad Request for mismatched passwords
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Passwords do not match.");
+        }
 
         // 2. Check for existing username
         if (userRepository.findByUsername(registrationRequest.username()).isPresent()) {
@@ -68,16 +73,16 @@ public class UserServiceImpl implements UserService {
             if (existingUser.isVerified()) {
                 // Email already exists and is verified - Cannot re-register
                 log.warn("Registration failed: Email '{}' already exists and is verified.", registrationRequest.email());
-                throw new ResponseStatusException(HttpStatus.CONFLICT, REGISTRATION_CONFLICT_MESSAGE);
             } else {
-                // Email exists but is NOT verified - Update existing record and resend verification
-                log.info("Email '{}' exists but is unverified. Updating password and resending verification.", registrationRequest.email());
-                return updateUnverifiedUserAndResendVerification(existingUser, registrationRequest.password());
+                // Email exists but is NOT verified - DO NOT update. Signal conflict.
+                log.warn("Registration attempt failed: Email '{}' already exists but is unverified. Suggesting user check email or use resend.", registrationRequest.email());
+                // Use the same generic conflict message as duplicate username/verified email
+                // to avoid revealing the verification status of an existing email.
             }
+            throw new ResponseStatusException(HttpStatus.CONFLICT, REGISTRATION_CONFLICT_MESSAGE);
         }
 
-        // 4. No existing user with this email, proceed with new user creation
-        return createNewUserAndSendVerification(registrationRequest);
+        createNewUserAndSendVerification(registrationRequest);
     }
 
     @Override
@@ -94,7 +99,7 @@ public class UserServiceImpl implements UserService {
 
         // Idempotency: If already verified, clear token info and return success.
         if (user.isVerified()) {
-            log.warn("Verification attempt for already verified user: {}", user.getUsername());
+            log.info("Verification attempt for already verified user: {}. Treating as success.", user.getUsername()); // Changed log level
             if (user.getVerificationToken() != null) {
                 user.setVerificationToken(null);
                 user.setVerificationTokenExpiryDate(null);
@@ -155,7 +160,7 @@ public class UserServiceImpl implements UserService {
     /**
      * Creates a new user, saves them, and triggers the verification email.
      */
-    private AppUser createNewUserAndSendVerification(RegistrationRequest registrationRequest) {
+    private void createNewUserAndSendVerification(RegistrationRequest registrationRequest) {
         String hashedPassword = passwordEncoder.encode(registrationRequest.password());
         AppUser newUser = new AppUser(
                 registrationRequest.username(),
@@ -175,27 +180,6 @@ public class UserServiceImpl implements UserService {
         log.info("Successfully registered new user '{}' with ID: {}. Verification pending.", savedUser.getUsername(), savedUser.getId());
 
         triggerVerificationEmail(savedUser, token);
-        return savedUser;
-    }
-
-    /**
-     * Updates an existing unverified user's password, generates a new token,
-     * saves, and triggers the verification email.
-     */
-    private AppUser updateUnverifiedUserAndResendVerification(AppUser existingUser, String newPassword) {
-        String hashedPassword = passwordEncoder.encode(newPassword);
-        existingUser.setPassword(hashedPassword); // Update password
-
-        String token = generateSecureToken();
-        Instant expiryDate = Instant.now().plus(Duration.parse(tokenDurationString));
-        existingUser.setVerificationToken(token);
-        existingUser.setVerificationTokenExpiryDate(expiryDate);
-
-        AppUser savedUser = userRepository.save(existingUser);
-        log.info("Re-initiated verification for existing unverified user '{}' with ID: {}", savedUser.getUsername(), savedUser.getId());
-
-        triggerVerificationEmail(savedUser, token);
-        return savedUser;
     }
 
     /**
@@ -215,6 +199,8 @@ public class UserServiceImpl implements UserService {
             emailService.sendVerificationEmail(user, token, appBaseUrl);
         } catch (Exception e) {
             log.error("Error triggering verification email for user {} (ID: {}).", user.getUsername(), user.getId(), e);
+            // Consider adding more robust error handling here if email failure is critical
+            // (e.g., marking the user differently, queuing for retry)
         }
     }
 }
