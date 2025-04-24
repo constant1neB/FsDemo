@@ -7,7 +7,7 @@ import jakarta.validation.constraints.Size;
 import java.time.Instant;
 
 @Entity
-@Table(name = "videos", // Explicit table name is good practice
+@Table(name = "videos",
         indexes = {
                 @Index(name = "idx_video_owner", columnList = "user_id"),
                 @Index(name = "idx_video_storage_path", columnList = "storagePath", unique = true),
@@ -94,16 +94,8 @@ public class Video {
         return owner;
     }
 
-    public void setOwner(AppUser owner) {
-        this.owner = owner;
-    }
-
     public String getGeneratedFilename() {
         return generatedFilename;
-    }
-
-    public void setGeneratedFilename(String generatedFilename) {
-        this.generatedFilename = generatedFilename;
     }
 
     public String getDescription() {
@@ -118,16 +110,8 @@ public class Video {
         return uploadDate;
     }
 
-    public void setUploadDate(Instant uploadDate) {
-        this.uploadDate = uploadDate;
-    }
-
     public String getStoragePath() {
         return storagePath;
-    }
-
-    public void setStoragePath(String storagePath) {
-        this.storagePath = storagePath;
     }
 
     public String getProcessedStoragePath() {
@@ -142,16 +126,8 @@ public class Video {
         return fileSize;
     }
 
-    public void setFileSize(Long fileSize) {
-        this.fileSize = fileSize;
-    }
-
     public String getMimeType() {
         return mimeType;
-    }
-
-    public void setMimeType(String mimeType) {
-        this.mimeType = mimeType;
     }
 
     public Double getDuration() {
