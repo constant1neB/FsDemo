@@ -121,6 +121,7 @@ public class FsDemoApplication implements CommandLineRunner {
             logger.info("User '{}' not found, creating...", username);
             String hashedPassword = argon2Encoder.encode(rawPassword);
             AppUser newUser = new AppUser(username, hashedPassword, FsDemoApplication.USER_ROLE, username + FsDemoApplication.EMAIL_SUFFIX);
+            newUser.setVerified(true);
             AppUser savedUser = userRepository.save(newUser);
             logger.info("Created test user '{}'", username);
             return savedUser;

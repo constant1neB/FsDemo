@@ -5,6 +5,7 @@ import com.example.fsdemo.security.JwtService;
 import com.example.fsdemo.service.UserService;
 import com.example.fsdemo.web.dto.RegistrationRequest;
 import com.example.fsdemo.web.dto.ResendVerificationRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -102,5 +103,20 @@ public class UserController {
                 .header(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS, HttpHeaders.AUTHORIZATION)
                 .header(HttpHeaders.SET_COOKIE, fingerprintCookie.toString())
                 .build();
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(HttpServletResponse response) {
+        ResponseCookie clearCookie = ResponseCookie.from(JwtService.FINGERPRINT_COOKIE_NAME, "")
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("Strict")
+                .path("/api")
+                .maxAge(0)
+                .build();
+
+        response.addHeader(HttpHeaders.SET_COOKIE, clearCookie.toString());
+
+        return ResponseEntity.ok().build();
     }
 }
