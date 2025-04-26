@@ -30,7 +30,7 @@ public class EmailServiceImpl implements EmailService {
     @Override
     @Async // Run in a background thread from AsyncConfig
     public void sendVerificationEmail(AppUser user, String token, String baseUrl) {
-        String verificationUrl = baseUrl + "/verify-email?token=" + token;
+        String verificationUrl = baseUrl + "/api/auth/verify-email?token=" + token;
         String subject = "Please Verify Your Email Address";
         String body = "<html><body>" +
                 "<h2>Welcome to FsDemo!</h2>" +
