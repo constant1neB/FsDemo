@@ -139,8 +139,8 @@ public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
         if (storagePath == null || storagePath.isBlank()) {
             throw new VideoStorageException("Storage path cannot be null or blank.");
         }
-        // Basic check for path characters within the relative path itself
-        if (storagePath.contains("..") || storagePath.contains("/") || storagePath.contains("\\")) {
+        // Basic check for path traversal characters within the relative path itself
+        if (storagePath.contains("..") || storagePath.contains("\\")) {
             throw new VideoStorageException("Invalid characters found in storage path: " + storagePath);
         }
 

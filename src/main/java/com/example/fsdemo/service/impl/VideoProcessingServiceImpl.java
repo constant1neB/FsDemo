@@ -39,6 +39,7 @@ import java.util.stream.Collectors;
 public class VideoProcessingServiceImpl implements VideoProcessingService {
 
     private static final Logger log = LoggerFactory.getLogger(VideoProcessingServiceImpl.class);
+    private static final String PROCESSED_SUBDIR = "processed";
 
     private final VideoRepository videoRepository;
     private final VideoStorageService videoStorageService;
@@ -107,7 +108,7 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             }
 
             // Create Temp Input File
-            String tempInputFilename = "temp-in-" + UUID.randomUUID() + "-" + video.getGeneratedFilename();
+            String tempInputFilename = "temp-in-" + UUID.randomUUID();
             tempInputPath = temporaryStorageLocation.resolve(tempInputFilename).normalize().toAbsolutePath();
             if (!tempInputPath.startsWith(temporaryStorageLocation)) {
                 throw new VideoStorageException("Security Error: Invalid temporary input path generated: " + tempInputPath);
@@ -134,7 +135,7 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             log.info("[Async][TX:{}] FFmpeg processing completed successfully for video ID: {}", txName, videoId);
 
             // Move Processed File
-            finalProcessedFilename = video.getId() + "-processed-" + UUID.randomUUID() + ".mp4";
+            finalProcessedFilename = "processed-" + UUID.randomUUID() + ".mp4";
             Path finalProcessedPath = processedStorageLocation.resolve(finalProcessedFilename).normalize().toAbsolutePath();
             if (!finalProcessedPath.startsWith(processedStorageLocation)) {
                 throw new VideoStorageException("Security Error: Invalid final processed path generated: " + finalProcessedPath);
@@ -143,8 +144,12 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             Files.move(tempOutputPath, finalProcessedPath);
             log.debug("[Async][TX:{}] Moved processed file from {} to {}", txName, tempOutputPath, finalProcessedPath);
 
+            String relativeProcessedPath = Paths.get(PROCESSED_SUBDIR, finalProcessedFilename).toString()
+                    .replace("\\", "/");
+            log.debug("[Async][TX:{}] Constructed relative path for DB storage: {}", txName, relativeProcessedPath);
+
             // Update Status via Service
-            videoStatusUpdater.updateStatusToReady(videoId, finalProcessedFilename);
+            videoStatusUpdater.updateStatusToReady(videoId, relativeProcessedPath);
             log.info("[Async][TX:{}] Successfully processed video ID: {}. Status update requested.", txName, videoId);
 
         } catch (InterruptedException e) {
