@@ -5,11 +5,13 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
+import java.util.UUID;
 
 @Entity
 @Table(name = "videos",
         indexes = {
                 @Index(name = "idx_video_owner", columnList = "user_id"),
+                @Index(name = "idx_video_public_id", columnList = "publicId", unique = true),
                 @Index(name = "idx_video_storage_path", columnList = "storagePath", unique = true),
                 @Index(name = "idx_video_processed_path", columnList = "processedStoragePath", unique = true)
         })
@@ -19,13 +21,13 @@ public class Video {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    // Public identifier for external use (API, frontend)
+    @Column(nullable = false, unique = true, updatable = false, length = 36)
+    private String publicId;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false, foreignKey = @ForeignKey(name = "fk_video_owner"))
     private AppUser owner;
-
-    // Server-generated UUID-based name.
-    @Column(nullable = false, length = 50) // UUID (36 chars) + .mp4 (4 chars) = 40. 50 gives buffer.
-    private String generatedFilename;
 
     @Pattern(regexp = "^[\\p{L}0-9.,!?_;:() \\r\\n-]*$",
             message = "Description contains invalid characters. Only letters, numbers, whitespace (including newlines), and basic punctuation (. , ! ? - _ ; : ( )) are allowed.")
@@ -40,7 +42,7 @@ public class Video {
     @Column(nullable = false, unique = true, length = 512) // Increased length for flexibility
     private String storagePath;
 
-    // Path where the LATEST PROCESSED file is stored (nullable if not processed yet or failed)
+    // Path where the latest processed file is stored (nullable if not processed yet or failed)
     @Column(unique = true, length = 512) // Nullable, unique path for processed file
     private String processedStoragePath;
 
@@ -71,9 +73,9 @@ public class Video {
     }
 
     // Constructor for creating new Video instances (e.g., in Controller)
-    public Video(AppUser owner, String generatedFilename, String description, Instant uploadDate, String storagePath, Long fileSize, String mimeType) {
+    public Video(AppUser owner, String description, Instant uploadDate, String storagePath, Long fileSize, String mimeType) {
+        this.publicId = UUID.randomUUID().toString();
         this.owner = owner;
-        this.generatedFilename = generatedFilename; // Use new field name
         this.description = description;
         this.uploadDate = uploadDate;
         this.storagePath = storagePath;
@@ -90,12 +92,12 @@ public class Video {
         this.id = id;
     }
 
-    public AppUser getOwner() {
-        return owner;
+    public String getPublicId() {
+        return publicId;
     }
 
-    public String getGeneratedFilename() {
-        return generatedFilename;
+    public AppUser getOwner() {
+        return owner;
     }
 
     public String getDescription() {
