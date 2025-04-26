@@ -76,11 +76,9 @@ public class VideoController {
     @GetMapping("/{publicId}")
     public ResponseEntity<VideoResponse> getVideoDetails(@PathVariable String publicId, Authentication authentication) {
         String username = authentication.getName();
-        log.debug("Get video details request received for public ID: {} from user: {}", publicId, username);
         Long id = getInternalId(publicId);
         Video video = videoManagementService.getVideoForViewing(id, username);
         VideoResponse responseDto = VideoResponse.fromEntity(video);
-        log.info("Returning details for video public ID: {}", publicId);
         return ResponseEntity.ok(responseDto);
     }
 
@@ -91,7 +89,6 @@ public class VideoController {
             Authentication authentication) {
 
         String username = authentication.getName();
-        log.info("Processing request received for video public ID: {} from user: {}", publicId, username);
         Long id = getInternalId(publicId);
 
         // Authorize first using the service method
@@ -113,14 +110,12 @@ public class VideoController {
             }
         } // Other exceptions handled globally
 
-        log.info("Returning 202 Accepted for processing request of video public ID: {}", publicId);
         return ResponseEntity.accepted().build();
     }
 
     @GetMapping("/{publicId}/download")
     public ResponseEntity<Resource> downloadVideo(@PathVariable String publicId, Authentication authentication) {
         String username = authentication.getName();
-        log.debug("Download request received in controller for video public ID: {} from user: {}", publicId, username);
         Long id = getInternalId(publicId);
         VideoDownloadDetails downloadDetails = videoManagementService.prepareVideoDownload(id, username);
         ResponseEntity.BodyBuilder responseBuilder = ResponseEntity.ok()
@@ -142,21 +137,17 @@ public class VideoController {
             Authentication authentication) {
 
         String username = authentication.getName();
-        log.debug("Update video description request received for public ID: {} from user: {}", publicId, username);
         Long id = getInternalId(publicId);
         Video savedVideo = videoManagementService.updateVideoDescription(id, request.description(), username);
         VideoResponse responseDto = VideoResponse.fromEntity(savedVideo);
-        log.info("Controller returning OK for updated video public ID: {}", publicId);
         return ResponseEntity.ok(responseDto);
     }
 
     @DeleteMapping("/{publicId}")
     public ResponseEntity<Void> deleteVideo(@PathVariable String publicId, Authentication authentication) {
         String username = authentication.getName();
-        log.debug("Delete request received in controller for video public ID: {} from user: {}", publicId, username);
         Long id = getInternalId(publicId);
         videoManagementService.deleteVideo(id, username);
-        log.info("Controller returning NoContent for delete request of video public ID: {}", publicId);
         return ResponseEntity.noContent().build();
     }
 

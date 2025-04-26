@@ -74,7 +74,6 @@ public class VideoManagementServiceImpl implements VideoManagementService {
 
         Video video = new Video(
                 owner,
-                generatedFilename,
                 description,
                 Instant.now(),
                 storagePath,
