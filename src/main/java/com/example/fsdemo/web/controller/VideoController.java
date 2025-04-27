@@ -1,3 +1,4 @@
+// FILE: src/main/java/com/example/fsdemo/web/controller/VideoController.java
 package com.example.fsdemo.web.controller;
 
 import com.example.fsdemo.domain.Video;
@@ -101,14 +102,14 @@ public class VideoController {
             videoProcessingService.processVideoEdits(id, options, username);
         } catch (IllegalStateException e) {
             log.warn("Processing conflict for user: {} on video ID: {}. Reason: {}", username, id, e.getMessage());
-            if (e.getMessage() != null && e.getMessage().contains("current state")) {
+            if (e.getMessage() != null && (e.getMessage().contains("current state") || e.getMessage().contains("cannot transition"))) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage(), e);
             } else if (e.getMessage() != null && e.getMessage().contains("not found")) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage(), e);
             } else {
                 throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to initiate video processing.", e);
             }
-        } // Other exceptions handled globally
+        }
 
         return ResponseEntity.accepted().build();
     }
@@ -117,18 +118,39 @@ public class VideoController {
     public ResponseEntity<Resource> downloadVideo(@PathVariable String publicId, Authentication authentication) {
         String username = authentication.getName();
         Long id = getInternalId(publicId);
-        VideoDownloadDetails downloadDetails = videoManagementService.prepareVideoDownload(id, username);
+        VideoDownloadDetails downloadDetails = videoManagementService.prepareVideoDownload(id, username); // Uses existing service method
+
         ResponseEntity.BodyBuilder responseBuilder = ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(downloadDetails.mimeType()))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + downloadDetails.downloadFilename() + "\"");
         if (downloadDetails.contentLength() != null) {
             responseBuilder.contentLength(downloadDetails.contentLength());
-            log.debug("Successfully set content length ({}) from DTO for video ID: {}", downloadDetails.contentLength(), id);
+            log.debug("Successfully set content length ({}) for LATEST download from DTO for video ID: {}", downloadDetails.contentLength(), id);
         } else {
-            log.warn("Content length was null in DownloadDetails for video ID: {}. Proceeding without.", id);
+            log.warn("Content length was null in DownloadDetails for LATEST download for video ID: {}. Proceeding without.", id);
         }
         return responseBuilder.body(downloadDetails.resource());
     }
+
+    @GetMapping("/{publicId}/download/original")
+    public ResponseEntity<Resource> downloadOriginalVideo(@PathVariable String publicId, Authentication authentication) {
+        String username = authentication.getName();
+        Long id = getInternalId(publicId);
+        VideoDownloadDetails downloadDetails = videoManagementService.prepareOriginalVideoDownload(id, username);
+
+        ResponseEntity.BodyBuilder responseBuilder = ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(downloadDetails.mimeType()))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + downloadDetails.downloadFilename() + "\"");
+
+        if (downloadDetails.contentLength() != null) {
+            responseBuilder.contentLength(downloadDetails.contentLength());
+            log.debug("Successfully set content length ({}) for ORIGINAL download from DTO for video ID: {}", downloadDetails.contentLength(), id);
+        } else {
+            log.warn("Content length was null in DownloadDetails for ORIGINAL download for video ID: {}. Proceeding without.", id);
+        }
+        return responseBuilder.body(downloadDetails.resource());
+    }
+
 
     @PutMapping("/{publicId}")
     public ResponseEntity<VideoResponse> updateVideoDescription(

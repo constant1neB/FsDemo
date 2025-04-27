@@ -254,8 +254,7 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
     }
 
 
-    // --- Helper methods (handleFfmpegTimeout, getStreamOutput, handleFfmpegCompletion, buildFfmpegCommand, readStream, cleanupTempFile) remain the same ---
-    // (Keep the existing implementations of these methods)
+    // --- Helper methods ---
     private void handleFfmpegTimeout(Process process, ExecutorService executor, Long videoId, long timeoutSeconds) throws TimeoutException {
         String timeoutMsg = String.format("[Async] FFmpeg process timed out after %s seconds for video ID: %s. Attempting to destroy and shutdown readers.",
                 timeoutSeconds, videoId);
