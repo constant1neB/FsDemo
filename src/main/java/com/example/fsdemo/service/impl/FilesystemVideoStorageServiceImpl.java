@@ -75,7 +75,7 @@ public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
                 Files.copy(inputStream, destinationFile);
             }
             log.info("Successfully stored file for user {}", userId);
-            return generatedFilename; // Return only the filename part, assuming it's stored directly in root
+            return generatedFilename;
 
         } catch (IOException e) {
             throw new VideoStorageException("Failed to store file " + generatedFilename, e);
@@ -139,7 +139,6 @@ public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
         if (storagePath == null || storagePath.isBlank()) {
             throw new VideoStorageException("Storage path cannot be null or blank.");
         }
-        // Basic check for path traversal characters within the relative path itself
         if (storagePath.contains("..") || storagePath.contains("\\")) {
             throw new VideoStorageException("Invalid characters found in storage path: " + storagePath);
         }
@@ -147,7 +146,6 @@ public class FilesystemVideoStorageServiceImpl implements VideoStorageService {
         try {
             Path resolvedPath = this.rootLocation.resolve(storagePath).normalize().toAbsolutePath();
 
-            // Ensure the final, normalized, absolute path is still within the root location.
             if (!resolvedPath.startsWith(this.rootLocation)) {
                 throw new VideoStorageException("Security check failed: Cannot access file outside designated directory: " + storagePath);
             }

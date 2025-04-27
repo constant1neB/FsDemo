@@ -4,8 +4,9 @@ import com.example.fsdemo.domain.Video;
 import org.springframework.data.repository.CrudRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
-import java.util.List;
 import java.util.Optional;
 
 public interface VideoRepository extends CrudRepository<Video, Long> {
@@ -20,13 +21,14 @@ public interface VideoRepository extends CrudRepository<Video, Long> {
     Optional<Video> findByPublicId(String publicId);
 
     /**
-     * Finds all videos owned by a specific user based on their username.
-     * Uses a JOIN FETCH to eagerly load the owner information, preventing N+1 queries
-     * when accessing owner details later.
+     * Finds all videos owned by a specific user based on their username, with pagination.
+     * Uses a JOIN FETCH to eagerly load the owner information.
      *
      * @param username The username of the owner.
-     * @return A list of videos owned by the user.
+     * @param pageable Pagination and sorting information.
+     * @return A page of videos owned by the user.
      */
-    @Query("SELECT v FROM Video v JOIN FETCH v.owner o WHERE o.username = :username")
-    List<Video> findByOwnerUsername(@Param("username") String username);
+    @Query(value = "SELECT v FROM Video v JOIN FETCH v.owner o WHERE o.username = :username",
+            countQuery = "SELECT count(v) FROM Video v WHERE v.owner.username = :username")
+    Page<Video> findByOwnerUsername(@Param("username") String username, Pageable pageable);
 }

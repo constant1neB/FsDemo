@@ -45,7 +45,6 @@ public class AuthenticationFilter extends OncePerRequestFilter {
             log.debug("Authentication successful for user '{}'. Security context updated.", username);
         } else {
             // Validation failed (missing token/cookie, invalid signature, claim mismatch, or fingerprint mismatch)
-            // Clear context just in case, although it should be null anyway
             SecurityContextHolder.clearContext();
             log.debug("JWT/Fingerprint validation failed or not provided. Security context cleared.");
         }

@@ -1,4 +1,3 @@
-// FILE: src/main/java/com/example/fsdemo/service/impl/VideoManagementServiceImpl.java
 package com.example.fsdemo.service.impl;
 
 import com.example.fsdemo.domain.AppUser;
@@ -16,10 +15,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -53,7 +53,7 @@ public class VideoManagementServiceImpl implements VideoManagementService {
         this.videoUploadValidator = videoUploadValidator;
     }
 
-    // --- Public Service Methods ---
+    // Public service methods
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -78,7 +78,7 @@ public class VideoManagementServiceImpl implements VideoManagementService {
                 owner,
                 description,
                 Instant.now(),
-                storagePath, // This is likely just the filename, e.g., "uuid.mp4"
+                storagePath,
                 file.getSize(),
                 file.getContentType()
         );
@@ -90,9 +90,9 @@ public class VideoManagementServiceImpl implements VideoManagementService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<Video> listUserVideos(String username) {
-        log.debug("Listing videos for user: {}", username);
-        return videoRepository.findByOwnerUsername(username);
+    public Page<Video> listUserVideos(String username, Pageable pageable) {
+        log.debug("Listing videos for user: {} with pageable: {}", username, pageable);
+        return videoRepository.findByOwnerUsername(username, pageable);
     }
 
     @Override
@@ -101,7 +101,7 @@ public class VideoManagementServiceImpl implements VideoManagementService {
         log.debug("Prepare LATEST download process started for video ID: {} by user: {}", videoId, username);
         Video video = findAndAuthorizeVideo(videoId, username, "VIEW_LATEST");
         String latestStoragePath = determineDownloadPath(video); // Get path (processed or original)
-        return prepareDownloadInternal(video, latestStoragePath, "latest"); // Call refactored helper
+        return prepareDownloadInternal(video, latestStoragePath, "latest");
     }
 
     @Override
@@ -111,7 +111,7 @@ public class VideoManagementServiceImpl implements VideoManagementService {
         Video video = findAndAuthorizeVideo(videoId, username, "VIEW_ORIGINAL");
         String originalStoragePath = video.getStoragePath(); // Get original path directly
         validateStoragePathPresence(originalStoragePath, videoId, "Original"); // Validate it exists
-        return prepareDownloadInternal(video, originalStoragePath, "original"); // Call refactored helper
+        return prepareDownloadInternal(video, originalStoragePath, "original");
     }
 
     @Override
@@ -133,7 +133,7 @@ public class VideoManagementServiceImpl implements VideoManagementService {
     public Video updateVideoDescription(Long videoId, String newDescription, String username) {
         log.debug("Update description process started for video ID: {} by user: {}", videoId, username);
         Video video = findAndAuthorizeVideo(videoId, username, "MODIFY");
-        video.setDescription(newDescription != null ? newDescription : ""); // Handle null input
+        video.setDescription(newDescription != null ? newDescription : "");
         Video savedVideo = videoRepository.save(video);
         log.info("Successfully updated description for video ID: {}", savedVideo.getId());
         return savedVideo;
@@ -162,7 +162,7 @@ public class VideoManagementServiceImpl implements VideoManagementService {
         log.info("Successfully processed delete request in service layer for video ID: {}", videoId);
     }
 
-    // --- Private Helper Methods ---
+    // Private helper methods
 
     /**
      * Refactored internal method to prepare download details.
@@ -242,6 +242,7 @@ public class VideoManagementServiceImpl implements VideoManagementService {
 
     /**
      * Validates that a storage path string is not null or blank.
+     *
      * @throws ResponseStatusException if validation fails.
      */
     private void validateStoragePathPresence(String storagePath, Long videoId, String pathType) {
@@ -303,7 +304,7 @@ public class VideoManagementServiceImpl implements VideoManagementService {
             return resource.contentLength();
         } catch (IOException e) {
             log.warn("Could not determine content length for download (Video ID: {}): {}", videoId, e.getMessage());
-            return null; // Return null if content length cannot be determined
+            return null;
         }
     }
 

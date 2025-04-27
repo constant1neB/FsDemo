@@ -1,17 +1,14 @@
-// FILE: src/main/java/com/example/fsdemo/service/VideoManagementService.java
-// No changes needed in the interface itself based on the refactoring request.
-// It already defines prepareVideoDownload and prepareOriginalVideoDownload.
 package com.example.fsdemo.service;
 
 import com.example.fsdemo.domain.Video;
 import com.example.fsdemo.web.dto.VideoDownloadDetails;
 import com.example.fsdemo.exceptions.VideoValidationException;
 import com.example.fsdemo.exceptions.VideoStorageException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.web.server.ResponseStatusException;
 
 import org.springframework.web.multipart.MultipartFile;
-
-import java.util.List;
 
 public interface VideoManagementService {
 
@@ -61,12 +58,13 @@ public interface VideoManagementService {
     Video getVideoForViewing(Long videoId, String username);
 
     /**
-     * Retrieves a list of videos owned by the specified user.
+     * Retrieves a paginated list of videos owned by the specified user.
      *
      * @param username The username of the owner.
-     * @return A list of Video entities owned by the user.
+     * @param pageable Pagination and sorting information.
+     * @return A Page of Video entities owned by the user.
      */
-    List<Video> listUserVideos(String username);
+    Page<Video> listUserVideos(String username, Pageable pageable);
 
     /**
      * Verifies if the specified user has permission to process the video (is owner).

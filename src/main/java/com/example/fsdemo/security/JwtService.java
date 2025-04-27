@@ -33,7 +33,7 @@ public class JwtService {
 
     public static final String PREFIX = "Bearer ";
     public static final String FINGERPRINT_COOKIE_NAME = "__Secure-Fgp";
-    public static final String FINGERPRINT_CLAIM = "fgpHash"; // Claim name for the fingerprint hash
+    public static final String FINGERPRINT_CLAIM = "fgpHash";
 
     private SecretKey key;
     private final String base64Secret;
@@ -42,7 +42,7 @@ public class JwtService {
 
     public JwtService(
             @Value("${jwt.secret.key.base64}") String base64Secret,
-            @Value("${jwt.expiration.ms:3600000}") long expirationTime, // Default 1 hour
+            @Value("${jwt.expiration.ms:3600000}") long expirationTime,
             @Value("${jwt.issuer}") String issuer) {
 
         // Store the injected secret, validation happens in PostConstruct
@@ -79,7 +79,6 @@ public class JwtService {
         // 3. Check length AFTER successful decoding
         if (decodedKey.length < 32) {
             log.error("CRITICAL: Provided JWT secret key is too short. Must be at least 256 bits (32 bytes).");
-            // Throw the CORRECT exception if length is the issue
             throw new IllegalArgumentException("JWT Secret key must be at least 256 bits (32 bytes)");
         }
 

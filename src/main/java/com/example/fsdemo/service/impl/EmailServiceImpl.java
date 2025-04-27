@@ -28,7 +28,7 @@ public class EmailServiceImpl implements EmailService {
     }
 
     @Override
-    @Async // Run in a background thread from AsyncConfig
+    @Async
     public void sendVerificationEmail(AppUser user, String token, String baseUrl) {
         String verificationUrl = baseUrl + "/api/auth/verify-email?token=" + token;
         String subject = "Please Verify Your Email Address";
@@ -37,7 +37,7 @@ public class EmailServiceImpl implements EmailService {
                 "<p>Please click the link below to verify your email address:</p>" +
                 "<p><a href=\"" + verificationUrl + "\">Verify Email</a></p>" +
                 "<p>If you didn't register for an account, please ignore this email.</p>" +
-                "<p>This link will expire in 24 hours.</p>" + // Adjust if expiry changes
+                "<p>This link will expire in 24 hours.</p>" +
                 "</body></html>";
 
         MimeMessage message = mailSender.createMimeMessage();
@@ -46,8 +46,8 @@ public class EmailServiceImpl implements EmailService {
         try {
             helper.setTo(user.getEmail());
             helper.setSubject(subject);
-            helper.setText(body, true); // true indicates HTML content
-            helper.setFrom(fromAddress); // Set the sender address
+            helper.setText(body, true);
+            helper.setFrom(fromAddress);
 
             mailSender.send(message);
             log.info("Verification email sent successfully to {}", user.getEmail());

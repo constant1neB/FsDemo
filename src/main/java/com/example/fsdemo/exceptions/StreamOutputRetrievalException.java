@@ -7,7 +7,7 @@ package com.example.fsdemo.exceptions;
  */
 public class StreamOutputRetrievalException extends RuntimeException {
 
-    private final String streamName; // e.g., "STDOUT" or "STDERR"
+    private final String streamName;
 
     /**
      * Constructs a new StreamOutputRetrievalException.

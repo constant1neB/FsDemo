@@ -62,7 +62,8 @@ public class VideoStatusUpdaterImpl implements VideoStatusUpdater {
                     txName, videoId, video.getStatus(), existingProcessedPath);
             try {
                 videoStorageService.delete(existingProcessedPath);
-                log.info("[StatusUpdater][TX:{}] Successfully deleted previous processed file: {}", txName, existingProcessedPath);
+                log.info("[StatusUpdater][TX:{}] Successfully deleted previous processed file: {}",
+                        txName, existingProcessedPath);
             } catch (VideoStorageException e) {
                 log.warn("[StatusUpdater][TX:{}] Failed to delete previous processed file '{}' for video {}. Status update will proceed. Reason: {}",
                         txName, existingProcessedPath, videoId, e.getMessage());
@@ -77,7 +78,8 @@ public class VideoStatusUpdaterImpl implements VideoStatusUpdater {
             video.setStatus(VideoStatus.PROCESSING);
             video.setProcessedStoragePath(null);
             videoRepository.save(video);
-            log.info("[StatusUpdater][TX:{}] Successfully set status to PROCESSING and cleared processed path for video ID: {}", txName, videoId);
+            log.info("[StatusUpdater][TX:{}] Successfully set status to PROCESSING and cleared processed path for video ID: {}",
+                    txName, videoId);
         } catch (Exception e) {
             throw new IllegalStateException("Failed to update video status to PROCESSING for video ID: " + videoId, e);
         }
@@ -91,7 +93,8 @@ public class VideoStatusUpdaterImpl implements VideoStatusUpdater {
                 txName, videoId, processedStoragePath);
 
         if (processedStoragePath == null || processedStoragePath.isBlank()) {
-            log.error("[StatusUpdater][TX:{}] Processed storage path cannot be null or blank when setting status to READY for video ID: {}", txName, videoId);
+            log.error("[StatusUpdater][TX:{}] Processed storage path cannot be null or blank when setting status to READY for video ID: {}",
+                    txName, videoId);
             throw new IllegalArgumentException("Processed storage path is required to set status to READY.");
         }
 
@@ -114,7 +117,8 @@ public class VideoStatusUpdaterImpl implements VideoStatusUpdater {
             videoRepository.save(video);
             log.info("[StatusUpdater][TX:{}] Successfully set status to READY for video ID: {}", txName, videoId);
         } catch (Exception e) {
-            log.error("[StatusUpdater][TX:{}] CRITICAL: Failed to update video status/path to READY in database for video ID: {}", txName, videoId, e);
+            log.error("[StatusUpdater][TX:{}] CRITICAL: Failed to update video status/path to READY in database for video ID: {}",
+                    txName, videoId, e);
         }
     }
 
@@ -130,7 +134,8 @@ public class VideoStatusUpdaterImpl implements VideoStatusUpdater {
                     videoToFail.setStatus(VideoStatus.FAILED);
                     videoToFail.setProcessedStoragePath(null);
                     videoRepository.save(videoToFail);
-                    log.info("[StatusUpdater][TX:{}] Successfully set status to FAILED for video ID: {}", txName, videoId);
+                    log.info("[StatusUpdater][TX:{}] Successfully set status to FAILED for video ID: {}",
+                            txName, videoId);
                 } else {
                     log.warn("[StatusUpdater][TX:{}] Video {} status was not PROCESSING during failure handling (actual: {}). Not modifying status.",
                             txName, videoId, videoToFail.getStatus());
@@ -139,7 +144,8 @@ public class VideoStatusUpdaterImpl implements VideoStatusUpdater {
                 log.error("[StatusUpdater][TX:{}] Video {} not found during failure status update.", txName, videoId);
             }
         } catch (Exception updateEx) {
-            log.error("[StatusUpdater][TX:{}] CRITICAL: Failed to update status to FAILED for video ID: {}", txName, videoId, updateEx);
+            log.error("[StatusUpdater][TX:{}] CRITICAL: Failed to update status to FAILED for video ID: {}",
+                    txName, videoId, updateEx);
         }
     }
 }

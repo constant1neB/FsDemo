@@ -44,7 +44,6 @@ public class AppUser {
     @Column
     private Instant verificationTokenExpiryDate;
 
-    // --- Constructors ---
     public AppUser() {
     }
 
@@ -93,11 +92,11 @@ public class AppUser {
     }
 
 
-    public boolean isVerified() { // Getter for boolean often starts with "is"
+    public boolean isVerified() {
         return verified;
     }
 
-    public void setVerified(boolean verified) { // Setter for verified
+    public void setVerified(boolean verified) {
         this.verified = verified;
     }
 
@@ -109,11 +108,11 @@ public class AppUser {
         this.verificationTokenHash = verificationTokenHash;
     }
 
-    public Instant getVerificationTokenExpiryDate() { // Getter for expiry
+    public Instant getVerificationTokenExpiryDate() {
         return verificationTokenExpiryDate;
     }
 
-    public void setVerificationTokenExpiryDate(Instant verificationTokenExpiryDate) { // Setter for expiry
+    public void setVerificationTokenExpiryDate(Instant verificationTokenExpiryDate) {
         this.verificationTokenExpiryDate = verificationTokenExpiryDate;
     }
 }
