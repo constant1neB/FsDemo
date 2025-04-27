@@ -2,8 +2,10 @@ package com.example.fsdemo.service.impl;
 
 import com.example.fsdemo.domain.Video;
 import com.example.fsdemo.domain.Video.VideoStatus;
+import com.example.fsdemo.exceptions.VideoStorageException;
 import com.example.fsdemo.repository.VideoRepository;
 import com.example.fsdemo.service.VideoStatusUpdater;
+import com.example.fsdemo.service.VideoStorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,13 +21,15 @@ public class VideoStatusUpdaterImpl implements VideoStatusUpdater {
 
     private static final Logger log = LoggerFactory.getLogger(VideoStatusUpdaterImpl.class);
     private final VideoRepository videoRepository;
+    private final VideoStorageService videoStorageService;
 
     private static final EnumSet<VideoStatus> ALLOWED_START_PROCESSING_STATUSES =
-            EnumSet.of(VideoStatus.UPLOADED, VideoStatus.READY);
+            EnumSet.of(VideoStatus.UPLOADED, VideoStatus.READY, VideoStatus.FAILED);
 
     @Autowired
-    public VideoStatusUpdaterImpl(VideoRepository videoRepository) {
+    public VideoStatusUpdaterImpl(VideoRepository videoRepository, VideoStorageService videoStorageService) {
         this.videoRepository = videoRepository;
+        this.videoStorageService = videoStorageService;
     }
 
     @Override
@@ -51,11 +55,29 @@ public class VideoStatusUpdaterImpl implements VideoStatusUpdater {
             return;
         }
 
+        // Cleanup previous processed file before updating status
+        String existingProcessedPath = video.getProcessedStoragePath();
+        if (existingProcessedPath != null && !existingProcessedPath.isBlank()) {
+            log.info("[StatusUpdater][TX:{}] Video {} is in state {} and has existing processed path '{}'. Attempting cleanup.",
+                    txName, videoId, video.getStatus(), existingProcessedPath);
+            try {
+                videoStorageService.delete(existingProcessedPath);
+                log.info("[StatusUpdater][TX:{}] Successfully deleted previous processed file: {}", txName, existingProcessedPath);
+            } catch (VideoStorageException e) {
+                log.warn("[StatusUpdater][TX:{}] Failed to delete previous processed file '{}' for video {}. Status update will proceed. Reason: {}",
+                        txName, existingProcessedPath, videoId, e.getMessage());
+            } catch (Exception e) {
+                log.error("[StatusUpdater][TX:{}] Unexpected error deleting previous processed file '{}' for video {}. Status update will proceed.",
+                        txName, existingProcessedPath, videoId, e);
+            }
+        }
+        // End cleanup
+
         try {
             video.setStatus(VideoStatus.PROCESSING);
-            video.setProcessedStoragePath(null); // Clear any previous processed path
+            video.setProcessedStoragePath(null);
             videoRepository.save(video);
-            log.info("[StatusUpdater][TX:{}] Successfully set status to PROCESSING for video ID: {}", txName, videoId);
+            log.info("[StatusUpdater][TX:{}] Successfully set status to PROCESSING and cleared processed path for video ID: {}", txName, videoId);
         } catch (Exception e) {
             throw new IllegalStateException("Failed to update video status to PROCESSING for video ID: " + videoId, e);
         }
@@ -76,14 +98,12 @@ public class VideoStatusUpdaterImpl implements VideoStatusUpdater {
         Video video = videoRepository.findById(videoId)
                 .orElseThrow(() -> {
                     log.error("[StatusUpdater][TX:{}] Video not found for status update to READY: {}", txName, videoId);
-                    // This shouldn't happen if processing just finished, but handle defensively.
                     return new IllegalStateException("Video not found: " + videoId);
                 });
 
         if (video.getStatus() != VideoStatus.PROCESSING) {
-            log.warn("[StatusUpdater][TX:{}] Video {} cannot transition to READY from state {} (Expected PROCESSING).",
+            log.warn("[StatusUpdater][TX:{}] Video {} cannot transition to READY from state {} (Expected PROCESSING). Possible race condition or error.",
                     txName, videoId, video.getStatus());
-            // This might indicate a race condition or logic error if processing completed but status wasn't PROCESSING.
             throw new IllegalStateException("Video is not in PROCESSING state, cannot set to READY. Current state: " +
                     video.getStatus());
         }
@@ -91,11 +111,10 @@ public class VideoStatusUpdaterImpl implements VideoStatusUpdater {
         try {
             video.setStatus(VideoStatus.READY);
             video.setProcessedStoragePath(processedStoragePath);
-            // Potentially set other metadata like duration here if extracted during processing
             videoRepository.save(video);
             log.info("[StatusUpdater][TX:{}] Successfully set status to READY for video ID: {}", txName, videoId);
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to update video status to READY for video ID: " + videoId, e);
+            log.error("[StatusUpdater][TX:{}] CRITICAL: Failed to update video status/path to READY in database for video ID: {}", txName, videoId, e);
         }
     }
 
@@ -105,14 +124,12 @@ public class VideoStatusUpdaterImpl implements VideoStatusUpdater {
         String txName = TransactionSynchronizationManager.getCurrentTransactionName();
         log.info("[StatusUpdater][TX:{}] Attempting to set status to FAILED for video ID: {}", txName, videoId);
         try {
-            // Find the video within this new transaction
             Video videoToFail = videoRepository.findById(videoId).orElse(null);
             if (videoToFail != null) {
-                // Check if the status needs updating (idempotency) - Only fail from PROCESSING
                 if (videoToFail.getStatus() == VideoStatus.PROCESSING) {
                     videoToFail.setStatus(VideoStatus.FAILED);
-                    videoToFail.setProcessedStoragePath(null); // Ensure no processed path is associated on failure
-                    videoRepository.save(videoToFail); // Persist the FAILED status
+                    videoToFail.setProcessedStoragePath(null);
+                    videoRepository.save(videoToFail);
                     log.info("[StatusUpdater][TX:{}] Successfully set status to FAILED for video ID: {}", txName, videoId);
                 } else {
                     log.warn("[StatusUpdater][TX:{}] Video {} status was not PROCESSING during failure handling (actual: {}). Not modifying status.",
@@ -122,10 +139,7 @@ public class VideoStatusUpdaterImpl implements VideoStatusUpdater {
                 log.error("[StatusUpdater][TX:{}] Video {} not found during failure status update.", txName, videoId);
             }
         } catch (Exception updateEx) {
-            // Log critical failure: The attempt to mark the video as FAILED in the DB itself failed.
             log.error("[StatusUpdater][TX:{}] CRITICAL: Failed to update status to FAILED for video ID: {}", txName, videoId, updateEx);
-            // Do NOT re-throw here. The goal is to log this specific failure,
-            // but let the original exception that triggered this call propagate.
         }
     }
 }

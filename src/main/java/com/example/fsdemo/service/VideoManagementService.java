@@ -1,3 +1,6 @@
+// FILE: src/main/java/com/example/fsdemo/service/VideoManagementService.java
+// No changes needed in the interface itself based on the refactoring request.
+// It already defines prepareVideoDownload and prepareOriginalVideoDownload.
 package com.example.fsdemo.service;
 
 import com.example.fsdemo.domain.Video;
@@ -26,7 +29,8 @@ public interface VideoManagementService {
     Video uploadVideo(MultipartFile file, String description, String username);
 
     /**
-     * Prepares the necessary details for downloading a video file, performing permission checks.
+     * Prepares the necessary details for downloading the latest available video file
+     * (processed if READY, otherwise original), performing permission checks.
      *
      * @param videoId  The ID of the video to download.
      * @param username The username requesting the download.
@@ -34,6 +38,17 @@ public interface VideoManagementService {
      * @throws ResponseStatusException If video not found, user forbidden, or file unavailable.
      */
     VideoDownloadDetails prepareVideoDownload(Long videoId, String username);
+
+    /**
+     * Prepares the necessary details for downloading the ORIGINAL video file,
+     * performing permission checks.
+     *
+     * @param videoId  The ID of the video to download.
+     * @param username The username requesting the download.
+     * @return A DTO containing the resource, filename, mime type, and content length.
+     * @throws ResponseStatusException If video not found, user forbidden, or file unavailable.
+     */
+    VideoDownloadDetails prepareOriginalVideoDownload(Long videoId, String username);
 
     /**
      * Finds a video by ID and verifies if the specified user has permission to view it.

@@ -1,3 +1,4 @@
+// FILE: src/main/java/com/example/fsdemo/service/impl/VideoManagementServiceImpl.java
 package com.example.fsdemo.service.impl;
 
 import com.example.fsdemo.domain.AppUser;
@@ -32,6 +33,7 @@ public class VideoManagementServiceImpl implements VideoManagementService {
     private static final String ERROR_RETRIEVING_VIDEO_MESSAGE = "Error retrieving video file from storage";
     private static final String UNEXPECTED_ERROR_RETRIEVING_VIDEO_MESSAGE = "Unexpected error retrieving video file";
     private static final String FORBIDDEN_MESSAGE_OWNER_ACTION = "User does not have permission to perform this action on the video";
+    private static final String MISSING_STORAGE_PATH_MESSAGE = "Video file path/key is missing";
 
     private final VideoStorageService storageService;
     private final VideoRepository videoRepository;
@@ -51,7 +53,7 @@ public class VideoManagementServiceImpl implements VideoManagementService {
         this.videoUploadValidator = videoUploadValidator;
     }
 
-    // Public service methods
+    // --- Public Service Methods ---
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -76,7 +78,7 @@ public class VideoManagementServiceImpl implements VideoManagementService {
                 owner,
                 description,
                 Instant.now(),
-                storagePath,
+                storagePath, // This is likely just the filename, e.g., "uuid.mp4"
                 file.getSize(),
                 file.getContentType()
         );
@@ -96,25 +98,92 @@ public class VideoManagementServiceImpl implements VideoManagementService {
     @Override
     @Transactional(readOnly = true)
     public VideoDownloadDetails prepareVideoDownload(Long videoId, String username) {
-        log.debug("Prepare download process started for video ID: {} by user: {}", videoId, username);
+        log.debug("Prepare LATEST download process started for video ID: {} by user: {}", videoId, username);
+        Video video = findAndAuthorizeVideo(videoId, username, "VIEW_LATEST");
+        String latestStoragePath = determineDownloadPath(video); // Get path (processed or original)
+        return prepareDownloadInternal(video, latestStoragePath, "latest"); // Call refactored helper
+    }
 
-        // 1. Find and authorize video for viewing (ownership required)
-        Video video = findAndAuthorizeVideo(videoId, username, "VIEW");
+    @Override
+    @Transactional(readOnly = true)
+    public VideoDownloadDetails prepareOriginalVideoDownload(Long videoId, String username) {
+        log.debug("Prepare ORIGINAL download process started for video ID: {} by user: {}", videoId, username);
+        Video video = findAndAuthorizeVideo(videoId, username, "VIEW_ORIGINAL");
+        String originalStoragePath = video.getStoragePath(); // Get original path directly
+        validateStoragePathPresence(originalStoragePath, videoId, "Original"); // Validate it exists
+        return prepareDownloadInternal(video, originalStoragePath, "original"); // Call refactored helper
+    }
 
-        // 2. Determine path
-        String pathToDownload = determineDownloadPath(video);
+    @Override
+    @Transactional(readOnly = true)
+    public Video getVideoForViewing(Long videoId, String username) {
+        log.debug("Get video details request for video ID: {} by user: {}", videoId, username);
+        return findAndAuthorizeVideo(videoId, username, "VIEW");
+    }
 
-        // 3. Load resource
-        Resource resource = loadResourceOrThrow(pathToDownload, videoId);
+    @Override
+    @Transactional(readOnly = true)
+    public void authorizeVideoProcessing(Long videoId, String username) {
+        log.debug("Authorize video processing request for video ID: {} by user: {}", videoId, username);
+        findAndAuthorizeVideo(videoId, username, "PROCESS");
+    }
 
-        // 4. Generate download filename
-        String downloadFilename = UUID.randomUUID() + MP4_EXTENSION;
-        log.info("Generated download filename {} for video ID: {}", downloadFilename, videoId);
+    @Override
+    @Transactional
+    public Video updateVideoDescription(Long videoId, String newDescription, String username) {
+        log.debug("Update description process started for video ID: {} by user: {}", videoId, username);
+        Video video = findAndAuthorizeVideo(videoId, username, "MODIFY");
+        video.setDescription(newDescription != null ? newDescription : ""); // Handle null input
+        Video savedVideo = videoRepository.save(video);
+        log.info("Successfully updated description for video ID: {}", savedVideo.getId());
+        return savedVideo;
+    }
 
-        // 5. Get Content Length (best effort)
-        Long contentLength = getContentLengthSafely(resource, videoId);
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteVideo(Long videoId, String username) {
+        log.debug("Delete process started for video ID: {} by user: {}", videoId, username);
+        Video video = findAndAuthorizeVideo(videoId, username, "DELETE");
 
-        // 6. Return details
+        String originalStoragePath = video.getStoragePath();
+        String processedStoragePath = video.getProcessedStoragePath();
+
+        try {
+            videoRepository.delete(video);
+            log.info("Successfully deleted video metadata from database for ID: {}", videoId);
+        } catch (Exception e) {
+            log.error("Failed to delete video record from database for ID: {}. Proceeding with file cleanup.", videoId, e);
+        }
+
+        // Best effort file deletion
+        deleteFileFromStorage(originalStoragePath, videoId, "original");
+        deleteFileFromStorage(processedStoragePath, videoId, "processed");
+
+        log.info("Successfully processed delete request in service layer for video ID: {}", videoId);
+    }
+
+    // --- Private Helper Methods ---
+
+    /**
+     * Refactored internal method to prepare download details.
+     *
+     * @param video            The authorized Video entity.
+     * @param storagePathToUse The specific storage path (original or latest processed) to load.
+     * @param filenamePrefix   The prefix for the generated download filename ("original" or "latest").
+     * @return VideoDownloadDetails DTO.
+     */
+    private VideoDownloadDetails prepareDownloadInternal(Video video, String storagePathToUse, String filenamePrefix) {
+        log.debug("Preparing download internal for video ID: {}, using path: {}, prefix: {}", video.getId(), storagePathToUse, filenamePrefix);
+        // 1. Load resource using the provided path
+        Resource resource = loadResourceOrThrow(storagePathToUse, video.getId());
+
+        // 2. Generate download filename
+        String downloadFilename = filenamePrefix + "-" + UUID.randomUUID() + MP4_EXTENSION;
+
+        // 3. Get Content Length (best effort)
+        Long contentLength = getContentLengthSafely(resource, video.getId());
+
+        // 4. Return details
         return new VideoDownloadDetails(
                 resource,
                 downloadFilename,
@@ -122,69 +191,6 @@ public class VideoManagementServiceImpl implements VideoManagementService {
                 contentLength
         );
     }
-
-    @Override
-    @Transactional
-    public Video updateVideoDescription(Long videoId, String newDescription, String username) {
-        log.debug("Update description process started for video ID: {} by user: {}", videoId, username);
-
-        // 1. Find and authorize video for modification (ownership required)
-        Video video = findAndAuthorizeVideo(videoId, username, "MODIFY");
-
-        // 2. Update description
-        video.setDescription(newDescription != null ? newDescription : "");
-
-        // 3. Save and return
-        Video savedVideo = videoRepository.save(video);
-        log.info("Successfully updated description for video ID: {}", savedVideo.getId());
-        return savedVideo;
-    }
-
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public void deleteVideo(Long videoId, String username) {
-        log.debug("Delete process started for video ID: {} by user: {}", videoId, username);
-
-        // 1. Find and authorize video for deletion (ownership required)
-        Video video = findAndAuthorizeVideo(videoId, username, "DELETE");
-
-        // 2. Get storage paths
-        String originalStoragePath = video.getStoragePath();
-        String processedStoragePath = video.getProcessedStoragePath();
-
-        // 3. Delete from DB
-        try {
-            videoRepository.delete(video);
-            log.info("Successfully deleted video metadata from database for ID: {}", videoId);
-        } catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete video record", e);
-        }
-
-        // 4. Delete files from storage (best effort)
-        deleteFileFromStorage(originalStoragePath, videoId, "original");
-        deleteFileFromStorage(processedStoragePath, videoId, "processed");
-
-        log.info("Successfully processed delete request in service layer for video ID: {}", videoId);
-    }
-
-    // Authorization/retrieval methods
-
-    @Override
-    @Transactional(readOnly = true)
-    public Video getVideoForViewing(Long videoId, String username) {
-        // Delegate to the consolidated helper
-        return findAndAuthorizeVideo(videoId, username, "VIEW");
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public void authorizeVideoProcessing(Long videoId, String username) {
-        // Delegate to the consolidated helper (ignore return value)
-        findAndAuthorizeVideo(videoId, username, "PROCESS");
-    }
-
-    // Private helper methods
 
     /**
      * Finds a Video entity by its ID or throws a 404 ResponseStatusException if not found.
@@ -206,7 +212,7 @@ public class VideoManagementServiceImpl implements VideoManagementService {
 
         if (!videoSecurityService.isOwner(videoId, username)) {
             log.warn("Authorization failed: User '{}' forbidden to {} video ID: {}", username, actionDescription, videoId);
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, VideoManagementServiceImpl.FORBIDDEN_MESSAGE_OWNER_ACTION);
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, FORBIDDEN_MESSAGE_OWNER_ACTION);
         }
 
         log.debug("Authorization successful for user '{}' to {} video ID: {}", username, actionDescription, videoId);
@@ -214,77 +220,80 @@ public class VideoManagementServiceImpl implements VideoManagementService {
     }
 
     /**
-     * Determines the correct storage path (original or processed) for downloading.
+     * Determines the correct storage path (original or processed) for downloading the "latest" version.
+     * The path returned should be relative to the storage root, suitable for `storageService.load()`.
      */
     private String determineDownloadPath(Video video) {
         String pathToDownload;
+        // Prefer processed path if status is READY and path exists and is not blank
         if (video.getStatus() == Video.VideoStatus.READY && video.getProcessedStoragePath() != null &&
                 !video.getProcessedStoragePath().isBlank()) {
-            pathToDownload = video.getProcessedStoragePath();
+            pathToDownload = video.getProcessedStoragePath(); // e.g., "processed/uuid.mp4"
+            log.debug("Determined download path (latest) for video {}: Processed ({})", video.getId(), pathToDownload);
         } else {
-            pathToDownload = video.getStoragePath();
+            // Fallback to original path
+            pathToDownload = video.getStoragePath(); // e.g., "uuid.mp4"
+            log.debug("Determined download path (latest) for video {}: Original ({})", video.getId(), pathToDownload);
         }
 
-        if (pathToDownload == null || pathToDownload.isBlank()) {
-            log.error("Could not determine download path for video ID {}: Storage path/key is missing or blank. Status: {}",
-                    video.getId(), video.getStatus());
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Video file path/key is missing");
-        }
+        validateStoragePathPresence(pathToDownload, video.getId(), "Latest effective"); // Validate determined path
         return pathToDownload;
     }
 
     /**
+     * Validates that a storage path string is not null or blank.
+     * @throws ResponseStatusException if validation fails.
+     */
+    private void validateStoragePathPresence(String storagePath, Long videoId, String pathType) {
+        if (storagePath == null || storagePath.isBlank()) {
+            log.error("Could not determine {} download path for video ID {}: Storage path is missing or blank.",
+                    pathType, videoId);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, MISSING_STORAGE_PATH_MESSAGE);
+        }
+    }
+
+
+    /**
      * Loads a resource from the storage service or throws appropriate exceptions.
+     * Expects storagePath to be relative to the storage service's root.
      */
     private Resource loadResourceOrThrow(String storagePath, Long videoId) {
         try {
             Resource resource = storageService.load(storagePath);
-
-            // Check existence and readability after successful load attempt
             if (!resource.exists() || !resource.isReadable()) {
-                log.warn("Load resource check failed for video ID {}: Resource exists={}, isReadable={}",
-                        videoId, resource.exists(), resource.isReadable());
-                // Treat as Not Found if checks fail after load
+                log.warn("Load resource check failed for video ID {}: Resource exists={}, isReadable={}. Path attempted: {}",
+                        videoId, resource.exists(), resource.isReadable(), storagePath);
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, VIDEO_FILE_NOT_READABLE_MESSAGE);
             }
-
-            log.debug("Resource loaded successfully for video ID: {}", videoId);
+            log.debug("Resource loaded successfully for video ID: {}, Path: {}", videoId, storagePath);
             return resource;
-
         } catch (VideoStorageException e) {
-            // Check if the specific exception implies "Not Found"
             if (isNotFoundStorageException(e)) {
-                log.warn("Load resource failed for video ID {}: Storage service indicated file not found.",
-                        videoId, e);
+                log.warn("Load resource failed for video ID {}: Storage service indicated file not found. Path attempted: {}",
+                        videoId, storagePath, e);
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, VIDEO_FILE_NOT_FOUND_MESSAGE, e);
             } else {
-                // Log other storage exceptions as errors before throwing 500
-                log.error("Load resource failed for video ID {}: Unexpected storage service error.",
-                        videoId, e);
+                log.error("Load resource failed for video ID {}: Unexpected storage service error. Path attempted: {}",
+                        videoId, storagePath, e);
                 throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, ERROR_RETRIEVING_VIDEO_MESSAGE, e);
             }
-        } catch (ResponseStatusException e) {
-            // Rethrow ResponseStatusExceptions (like the 404 from exists/readable check) directly
+        } catch (ResponseStatusException e) { // Rethrow specific exceptions
             throw e;
-        } catch (Exception e) {
+        } catch (Exception e) { // Catch unexpected errors
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, UNEXPECTED_ERROR_RETRIEVING_VIDEO_MESSAGE, e);
         }
     }
 
     /**
      * Checks if a VideoStorageException's message indicates a "Not Found" scenario.
-     * Encapsulates the fragile message checking.
      */
     private boolean isNotFoundStorageException(VideoStorageException e) {
-        if (e.getMessage() == null) {
-            return false;
-        }
-        // Keep the message checks, but isolated here
-        return e.getMessage().contains("Could not read file") ||
-                e.getMessage().contains("not found") ||
-                e.getMessage().contains("Not found or not readable");
+        if (e.getMessage() == null) return false;
+        String lowerCaseMessage = e.getMessage().toLowerCase();
+        return lowerCaseMessage.contains("could not read file") ||
+                lowerCaseMessage.contains("not found") ||
+                lowerCaseMessage.contains("does not exist");
     }
-
 
     /**
      * Safely attempts to get the content length of a resource.
@@ -294,26 +303,34 @@ public class VideoManagementServiceImpl implements VideoManagementService {
             return resource.contentLength();
         } catch (IOException e) {
             log.warn("Could not determine content length for download (Video ID: {}): {}", videoId, e.getMessage());
-            return null;
+            return null; // Return null if content length cannot be determined
         }
     }
 
-
+    /**
+     * Deletes a file from storage using the provided storage path (relative to storage root).
+     * Logs errors without throwing exceptions to allow the primary operation to proceed.
+     */
     private void deleteFileFromStorage(String storagePath, Long videoId, String fileType) {
         if (storagePath == null || storagePath.isBlank()) {
             log.trace("No {} storage path found for video ID {}, skipping file deletion.", fileType, videoId);
             return;
         }
-        log.debug("Attempting to delete {} video file for ID: {}", fileType, videoId);
+        log.debug("Attempting to delete {} video file for ID: {} using path: {}", fileType, videoId, storagePath);
         try {
             storageService.delete(storagePath);
-            log.info("Successfully deleted {} video file for ID: {}", fileType, videoId);
+            log.info("Successfully deleted {} video file for ID: {} using path: {}", fileType, videoId, storagePath);
         } catch (VideoStorageException e) {
-            log.warn("Failed to delete {} file from storage after DB record deletion. Orphaned file likely exists. VideoID: {}, Reason: {}",
-                    fileType, videoId, e.getMessage());
+            if (isNotFoundStorageException(e)) {
+                log.warn("Attempted to delete non-existent {} file from storage. VideoID: {}, Path: {}, Reason: {}",
+                        fileType, videoId, storagePath, e.getMessage());
+            } else {
+                log.warn("Failed to delete {} file from storage. Orphaned file might exist. VideoID: {}, Path: {}, Reason: {}",
+                        fileType, videoId, storagePath, e.getMessage());
+            }
         } catch (Exception e) {
-            log.error("Unexpected error deleting {} file from storage after DB record deletion. Orphaned file likely exists. VideoID: {}",
-                    fileType, videoId, e);
+            log.error("Unexpected error deleting {} file from storage. Orphaned file might exist. VideoID: {}, Path: {}",
+                    fileType, videoId, storagePath, e);
         }
     }
 }
