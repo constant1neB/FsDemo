@@ -7,7 +7,7 @@ import org.springframework.core.io.Resource;
  */
 public record VideoDownloadDetails(
         Resource resource,
-        String downloadFilename, // The filename to suggest to the client
+        String downloadFilename,
         String mimeType,
-        Long contentLength // Optional, helps set Content-Length header
+        Long contentLength
 ) {}

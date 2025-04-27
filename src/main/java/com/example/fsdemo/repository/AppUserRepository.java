@@ -9,7 +9,6 @@ public interface AppUserRepository extends CrudRepository<AppUser, Long> {
 
     Optional<AppUser> findByUsername(String username);
 
-    // Find by the hashed token now
     Optional<AppUser> findByVerificationTokenHash(String tokenHash);
 
     Optional<AppUser> findByEmail(String email);

@@ -52,7 +52,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 HttpStatus.INTERNAL_SERVER_ERROR,
                 "Failed to process video storage operation. Please contact support if the problem persists."
         );
-        problemDetail.setTitle(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase()); // Use standard phrase
+        problemDetail.setTitle(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase());
         problemDetail.setInstance(URI.create(request.getDescription(false)));
         problemDetail.setProperty(TIMESTAMP_PROPERTY, Instant.now());
         return problemDetail;
@@ -247,7 +247,6 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                     request.getDescription(false), ex.getStatusCode(), ex.getReason());
         }
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(ex.getStatusCode(), ex.getReason());
-        // CORRECTED: Use standard HTTP reason phrase for the title if possible
         problemDetail.setTitle(getReasonPhrase(ex.getStatusCode()));
         problemDetail.setInstance(URI.create(request.getDescription(false)));
         problemDetail.setProperty(TIMESTAMP_PROPERTY, Instant.now());
@@ -289,7 +288,6 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                     HttpStatus.PAYLOAD_TOO_LARGE,
                     "Maximum upload size exceeded. " + maxEx.getLocalizedMessage()
             );
-            // CORRECTED: HttpStatus.PAYLOAD_TOO_LARGE is an HttpStatus enum
             problemDetail.setTitle(HttpStatus.PAYLOAD_TOO_LARGE.getReasonPhrase());
             problemDetail.setInstance(URI.create(request.getDescription(false)));
             problemDetail.setProperty(TIMESTAMP_PROPERTY, Instant.now());
@@ -307,7 +305,6 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             if (problemDetailToReturn.getInstance() == null) {
                 problemDetailToReturn.setInstance(URI.create(request.getDescription(false)));
             }
-            // Ensure title is set if missing, using standard phrase if possible
             if (problemDetailToReturn.getTitle() == null) {
                 problemDetailToReturn.setTitle(getReasonPhrase(statusCode));
             }
@@ -316,7 +313,6 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             log.warn("Creating basic ProblemDetail in handleExceptionInternal for exception type {}: {}",
                     ex.getClass().getSimpleName(), ex.getMessage());
             problemDetailToReturn = ProblemDetail.forStatus(statusCode);
-            // CORRECTED: Use standard reason phrase for title if possible
             problemDetailToReturn.setTitle(getReasonPhrase(statusCode));
             String detail = (ex.getCause() != null) ? ex.getCause().getMessage() : ex.getMessage();
             problemDetailToReturn.setDetail(detail);

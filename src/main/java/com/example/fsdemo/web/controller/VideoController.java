@@ -1,4 +1,3 @@
-// FILE: src/main/java/com/example/fsdemo/web/controller/VideoController.java
 package com.example.fsdemo.web.controller;
 
 import com.example.fsdemo.domain.Video;
@@ -20,8 +19,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
-
-import java.util.List;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 @RestController
 @RequestMapping("/api/videos")
@@ -63,15 +62,14 @@ public class VideoController {
     }
 
     @GetMapping
-    public ResponseEntity<List<VideoResponse>> listUserVideos(Authentication authentication) {
+    public ResponseEntity<Page<VideoResponse>> listUserVideos(Authentication authentication, Pageable pageable) {
         String username = authentication.getName();
-        log.debug("List videos request received for user: {}", username);
-        List<Video> userVideos = videoManagementService.listUserVideos(username);
-        List<VideoResponse> responseDtos = userVideos.stream()
-                .map(VideoResponse::fromEntity)
-                .toList();
-        log.info("Returning {} videos for user: {}", responseDtos.size(), username);
-        return ResponseEntity.ok(responseDtos);
+        log.debug("List videos request received for user: {} with pageable: {}", username, pageable);
+        Page<Video> userVideosPage = videoManagementService.listUserVideos(username, pageable);
+        Page<VideoResponse> responseDtoPage = userVideosPage.map(VideoResponse::fromEntity);
+        log.info("Returning page {} of {} videos for user: {}",
+                responseDtoPage.getNumber(), responseDtoPage.getNumberOfElements(), username);
+        return ResponseEntity.ok(responseDtoPage);
     }
 
     @GetMapping("/{publicId}")
@@ -118,14 +116,16 @@ public class VideoController {
     public ResponseEntity<Resource> downloadVideo(@PathVariable String publicId, Authentication authentication) {
         String username = authentication.getName();
         Long id = getInternalId(publicId);
-        VideoDownloadDetails downloadDetails = videoManagementService.prepareVideoDownload(id, username); // Uses existing service method
+        VideoDownloadDetails downloadDetails = videoManagementService.prepareVideoDownload(id, username);
 
         ResponseEntity.BodyBuilder responseBuilder = ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(downloadDetails.mimeType()))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + downloadDetails.downloadFilename() + "\"");
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + downloadDetails.downloadFilename() + "\"");
         if (downloadDetails.contentLength() != null) {
             responseBuilder.contentLength(downloadDetails.contentLength());
-            log.debug("Successfully set content length ({}) for LATEST download from DTO for video ID: {}", downloadDetails.contentLength(), id);
+            log.debug("Successfully set content length ({}) for LATEST download from DTO for video ID: {}",
+                    downloadDetails.contentLength(), id);
         } else {
             log.warn("Content length was null in DownloadDetails for LATEST download for video ID: {}. Proceeding without.", id);
         }
@@ -140,11 +140,13 @@ public class VideoController {
 
         ResponseEntity.BodyBuilder responseBuilder = ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(downloadDetails.mimeType()))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + downloadDetails.downloadFilename() + "\"");
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" +
+                        downloadDetails.downloadFilename() + "\"");
 
         if (downloadDetails.contentLength() != null) {
             responseBuilder.contentLength(downloadDetails.contentLength());
-            log.debug("Successfully set content length ({}) for ORIGINAL download from DTO for video ID: {}", downloadDetails.contentLength(), id);
+            log.debug("Successfully set content length ({}) for ORIGINAL download from DTO for video ID: {}",
+                    downloadDetails.contentLength(), id);
         } else {
             log.warn("Content length was null in DownloadDetails for ORIGINAL download for video ID: {}. Proceeding without.", id);
         }

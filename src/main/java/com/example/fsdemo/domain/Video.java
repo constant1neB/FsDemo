@@ -21,7 +21,6 @@ public class Video {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // Public identifier for external use (API, frontend)
     @Column(nullable = false, unique = true, updatable = false, length = 36)
     private String publicId;
 
@@ -39,20 +38,20 @@ public class Video {
     private Instant uploadDate;
 
     // Path where the file is actually stored (can be just the generatedFilename or a longer path)
-    @Column(nullable = false, unique = true, length = 512) // Increased length for flexibility
+    @Column(nullable = false, unique = true, length = 512)
     private String storagePath;
 
     // Path where the latest processed file is stored (nullable if not processed yet or failed)
-    @Column(unique = true, length = 512) // Nullable, unique path for processed file
+    @Column(unique = true, length = 512)
     private String processedStoragePath;
 
     @Column(nullable = false)
     private Long fileSize; // Store file size in bytes
 
-    @Column(length = 50) // e.g., "video/mp4"
+    @Column(length = 50)
     private String mimeType;
 
-    @Column // Nullable until processed
+    @Column
     private Double duration; // Duration in seconds, to be set after processing
 
     @Enumerated(EnumType.STRING)
@@ -72,7 +71,6 @@ public class Video {
     public Video() {
     }
 
-    // Constructor for creating new Video instances (e.g., in Controller)
     public Video(AppUser owner, String description, Instant uploadDate, String storagePath, Long fileSize, String mimeType) {
         this.publicId = UUID.randomUUID().toString();
         this.owner = owner;

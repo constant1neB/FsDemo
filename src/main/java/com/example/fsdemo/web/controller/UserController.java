@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
@@ -17,8 +18,8 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.server.ResponseStatusException;
 
+import java.net.URI;
 import java.security.SecureRandom;
 import java.util.HexFormat;
 
@@ -31,6 +32,9 @@ public class UserController {
     private final UserService userService;
 
     private final SecureRandom secureRandom = new SecureRandom();
+
+    @Value("${app.frontend-base-url}")
+    private String frontendBaseUrl;
 
     public UserController(JwtService jwtService, AuthenticationManager authenticationManager, UserService userService) {
         this.jwtService = jwtService;
@@ -47,16 +51,21 @@ public class UserController {
     }
 
     @GetMapping("/verify-email")
-    public ResponseEntity<String> verifyEmail(@RequestParam("token") String token) {
+    public ResponseEntity<Void> verifyEmail(@RequestParam("token") String token) {
         boolean success = userService.verifyUser(token);
+        String redirectUrl;
 
         if (success) {
-            // Consider redirecting to a frontend page instead of just returning text
-            return ResponseEntity.ok("Email successfully verified! You can now log in.");
+            redirectUrl = frontendBaseUrl + "/login?verified=true";
         } else {
-            // Provide a more user-friendly error page/message on the frontend if possible
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or expired verification token. Please try registering again or request a new verification email.");
+            redirectUrl = frontendBaseUrl + "/login?error=verification_failed";
         }
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setLocation(URI.create(redirectUrl));
+
+        // Return 302 Found status code to trigger browser redirect
+        return new ResponseEntity<>(headers, HttpStatus.FOUND);
     }
 
     @PostMapping("/resend-verification")
@@ -90,9 +99,9 @@ public class UserController {
         // 5. Create Hardened Fingerprint Cookie
         ResponseCookie fingerprintCookie = ResponseCookie.from(JwtService.FINGERPRINT_COOKIE_NAME, userFingerprint)
                 .httpOnly(true)
-                .secure(true) // Ensure this is true for production
+                .secure(true)
                 .sameSite("Strict")
-                .path("/api") // Make sure path matches API requests needing the cookie
+                .path("/api")
                 // .maxAge(Duration.ofSeconds(...)) // Consider setting maxAge same as JWT expiry
                 .build();
         log.debug("Setting fingerprint cookie for user: {}", username);

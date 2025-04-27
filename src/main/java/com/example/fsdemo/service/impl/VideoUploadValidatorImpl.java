@@ -70,12 +70,12 @@ public class VideoUploadValidatorImpl implements VideoUploadValidator {
                 throw new VideoValidationException(HttpStatus.BAD_REQUEST,
                         "File content does not appear to be a valid MP4 video.");
             }
-            log.trace("Magic byte validation passed for file with original name '{}'", originalFilename); // Use trace for successful low-level checks
+            log.trace("Magic byte validation passed for file with original name '{}'", originalFilename);
         } catch (IOException e) {
             throw new VideoValidationException(HttpStatus.INTERNAL_SERVER_ERROR, "Error reading file for validation.", e);
         }
 
-        // *** Antivirus Scan Hook Placeholder ***
+        // *** Antivirus scan hook placeholder ***
 
         log.debug("File validation passed for original filename: '{}'", originalFilename);
     }

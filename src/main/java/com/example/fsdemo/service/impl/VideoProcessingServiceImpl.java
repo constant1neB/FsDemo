@@ -131,7 +131,7 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             if (log.isDebugEnabled()) {
                 log.debug("[Async][TX:{}] FFmpeg command: {}", txName, String.join(" ", command));
             }
-            executeFfmpegProcess(command, videoId); // This method now handles the process start and monitoring
+            executeFfmpegProcess(command, videoId);
             log.info("[Async][TX:{}] FFmpeg processing completed successfully for video ID: {}", txName, videoId);
 
             // Move Processed File
@@ -174,7 +174,7 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
     public void executeFfmpegProcess(List<String> command, Long videoId)
             throws IOException, InterruptedException, FfmpegProcessingException, TimeoutException {
 
-        Process ffmpegProcess = null; // Declare here for finally block
+        Process ffmpegProcess = null;
         try (ExecutorService streamReaderExecutor = Executors.newVirtualThreadPerTaskExecutor()) {
             long timeoutSeconds = this.ffmpegTimeoutSeconds;
 
@@ -254,16 +254,19 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
     }
 
 
-    // --- Helper methods ---
-    private void handleFfmpegTimeout(Process process, ExecutorService executor, Long videoId, long timeoutSeconds) throws TimeoutException {
-        String timeoutMsg = String.format("[Async] FFmpeg process timed out after %s seconds for video ID: %s. Attempting to destroy and shutdown readers.",
+    // Private helper methods
+    private void handleFfmpegTimeout(Process process, ExecutorService executor, Long videoId, long timeoutSeconds)
+            throws TimeoutException {
+        String timeoutMsg = String.format(
+                "[Async] FFmpeg process timed out after %s seconds for video ID: %s. Attempting to destroy and shutdown readers.",
                 timeoutSeconds, videoId);
         log.error(timeoutMsg);
 
         log.warn("[Async] Timeout detected for video {}. Shutting down stream reader executor.", videoId);
         List<Runnable> tasksAwaitingExecution = executor.shutdownNow();
         if (!tasksAwaitingExecution.isEmpty()) {
-            log.warn("[Async] {} stream reader tasks were awaiting execution for video {}.", tasksAwaitingExecution.size(), videoId);
+            log.warn("[Async] {} stream reader tasks were awaiting execution for video {}.",
+                    tasksAwaitingExecution.size(), videoId);
         }
         try {
             if (!executor.awaitTermination(100, TimeUnit.MILLISECONDS)) {
@@ -289,7 +292,8 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
         } catch (TimeoutException | ExecutionException | InterruptedException e) {
             throw e;
         } catch (CancellationException e) {
-            log.warn("[Async] Stream reading task for {} cancelled for video {} (likely due to timeout/shutdown): {}", streamName, videoId, e.getMessage());
+            log.warn("[Async] Stream reading task for {} cancelled for video {} (likely due to timeout/shutdown): {}",
+                    streamName, videoId, e.getMessage());
             return "[" + streamName + " reading cancelled]";
         } catch (Exception e) {
             String errorMsg = String.format("Unexpected error retrieving %s output for video %d", streamName, videoId);
@@ -330,7 +334,8 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
                 command.add("-to");
                 command.add(String.valueOf(options.cutEndTime()));
             } else {
-                log.warn("Cut end time ({}) is not after cut start time ({}), ignoring end time.", options.cutEndTime(), options.cutStartTime());
+                log.warn("Cut end time ({}) is not after cut start time ({}), ignoring end time.",
+                        options.cutEndTime(), options.cutStartTime());
             }
         }
 
@@ -372,7 +377,8 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             log.error("[Async] IOException while reading stream {}: {}", streamName, e.getMessage());
             return "[Error reading stream: " + e.getMessage() + "]";
         } catch (UncheckedIOException e) {
-            log.warn("[Async] UncheckedIOException while reading stream {} (process likely terminated prematurely): {}", streamName, e.getMessage());
+            log.warn("[Async] UncheckedIOException while reading stream {} (process likely terminated prematurely): {}",
+                    streamName, e.getMessage());
             return "[Stream reading interrupted: " + e.getMessage() + "]";
         } catch (Exception e) {
             log.error("[Async] Unexpected error reading stream {}: {}", streamName, e.getMessage(), e);
@@ -387,14 +393,18 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             try {
                 if (Files.exists(tempPath)) {
                     Files.delete(tempPath);
-                    log.debug("[Async] Deleted temporary {} file for video {}: {}", type, videoId, tempPath);
+                    log.debug("[Async] Deleted temporary {} file for video {}: {}",
+                            type, videoId, tempPath);
                 } else {
-                    log.debug("[Async] Temporary {} file for video {} not found for deletion (already deleted or never created): {}", type, videoId, tempPath);
+                    log.debug("[Async] Temporary {} file for video {} not found for deletion (already deleted or never created): {}",
+                            type, videoId, tempPath);
                 }
             } catch (IOException ioEx) {
-                log.error("[Async] Failed to delete temporary {} file for video {}: {}", type, videoId, tempPath, ioEx);
+                log.error("[Async] Failed to delete temporary {} file for video {}: {}",
+                        type, videoId, tempPath, ioEx);
             } catch (Exception e) {
-                log.error("[Async] Unexpected error cleaning up temporary {} file for video {}: {}", type, videoId, tempPath, e);
+                log.error("[Async] Unexpected error cleaning up temporary {} file for video {}: {}",
+                        type, videoId, tempPath, e);
             }
         } else {
             log.trace("[Async] Temporary {} path was null for video {}, skipping cleanup.", type, videoId);

@@ -67,7 +67,6 @@ public class UserServiceImpl implements UserService {
         // 2. Check for existing username
         if (userRepository.findByUsername(registrationRequest.username()).isPresent()) {
             log.warn("Registration failed: Username '{}' already exists.", registrationRequest.username());
-            // Use the generic conflict message
             throw new ResponseStatusException(HttpStatus.CONFLICT, REGISTRATION_CONFLICT_MESSAGE);
         }
 
@@ -77,7 +76,6 @@ public class UserServiceImpl implements UserService {
         if (existingUserOpt.isPresent()) {
             // Regardless of verified status, if the email exists, fail the registration.
             // This prevents overwriting passwords for unverified users and avoids leaking verification status.
-            // Use the generic conflict message
             throw new ResponseStatusException(HttpStatus.CONFLICT, REGISTRATION_CONFLICT_MESSAGE);
         }
 
@@ -87,7 +85,7 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
-    public boolean verifyUser(String rawToken) { // Parameter is the raw token from URL
+    public boolean verifyUser(String rawToken) {
         if (rawToken == null || rawToken.isBlank()) {
             log.warn("Verification attempt with blank token.");
             return false;
@@ -103,11 +101,11 @@ public class UserServiceImpl implements UserService {
 
         AppUser user = userOpt.get();
 
-        // Idempotency: If already verified, clear token info and return success.
+        // If already verified, clear token info and return success.
         if (user.isVerified()) {
             log.info("Verification attempt for already verified user: {}. Treating as success.", user.getUsername());
             if (user.getVerificationTokenHash() != null) {
-                user.setVerificationTokenHash(null); // Clear hash
+                user.setVerificationTokenHash(null);
                 user.setVerificationTokenExpiryDate(null);
                 userRepository.save(user);
             }
@@ -117,13 +115,12 @@ public class UserServiceImpl implements UserService {
         // Check expiry
         if (user.getVerificationTokenExpiryDate() == null || user.getVerificationTokenExpiryDate().isBefore(Instant.now())) {
             log.warn("Verification failed: Token expired for user: {}", user.getUsername());
-            // Don't clear the token here, allow resend
             return false; // Indicate failure: Token expired
         }
 
         // Verification Success!
         user.setVerified(true);
-        user.setVerificationTokenHash(null); // Invalidate the token hash
+        user.setVerificationTokenHash(null);
         user.setVerificationTokenExpiryDate(null);
         userRepository.save(user);
 
@@ -186,7 +183,7 @@ public class UserServiceImpl implements UserService {
         AppUser savedUser = userRepository.save(newUser);
         log.info("Successfully registered new user '{}' with ID: {}. Verification pending.", savedUser.getUsername(), savedUser.getId());
 
-        triggerVerificationEmail(savedUser, rawToken); // Send raw token
+        triggerVerificationEmail(savedUser, rawToken);
     }
 
     /**
@@ -216,9 +213,8 @@ public class UserServiceImpl implements UserService {
     /**
      * Triggers the asynchronous email sending.
      */
-    private void triggerVerificationEmail(AppUser user, String rawToken) { // Takes raw token
+    private void triggerVerificationEmail(AppUser user, String rawToken) {
         try {
-            // Pass the raw token to the email service
             emailService.sendVerificationEmail(user, rawToken, appBaseUrl);
         } catch (Exception e) {
             log.error("Error triggering verification email for user {} (ID: {}).", user.getUsername(), user.getId(), e);

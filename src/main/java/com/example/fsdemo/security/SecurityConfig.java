@@ -64,12 +64,10 @@ public class SecurityConfig {
                 HttpHeaders.CONTENT_TYPE,
                 HttpHeaders.ACCEPT
         ));
-        // Allow credentials (cookies) to be sent from frontend
         config.setAllowCredentials(true);
-        // Expose the Authorization header (for JWT)
         config.setExposedHeaders(List.of(HttpHeaders.AUTHORIZATION));
         // Optional: Set max age for preflight requests
-        config.setMaxAge(3600L); // 1 hour
+        config.setMaxAge(3600L);
 
         source.registerCorsConfiguration("/**", config);
         return source;
@@ -80,7 +78,6 @@ public class SecurityConfig {
         http
                 // Disable CSRF - Relying on SameSite=Strict cookie and fingerprint check
                 .csrf(AbstractHttpConfigurer::disable)
-                // Enable CORS using the configured source
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
@@ -93,7 +90,6 @@ public class SecurityConfig {
                 )
                 // Add our custom filter BEFORE the standard UsernamePasswordAuthenticationFilter
                 .addFilterBefore(authenticationFilter, UsernamePasswordAuthenticationFilter.class)
-                // Configure exception handling, specifically for authentication errors
                 .exceptionHandling(exceptionHandling ->
                         exceptionHandling.authenticationEntryPoint(exceptionHandler)
                 );
