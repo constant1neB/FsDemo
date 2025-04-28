@@ -91,7 +91,6 @@ public class VideoManagementServiceImpl implements VideoManagementService {
     @Override
     @Transactional(readOnly = true)
     public Page<Video> listUserVideos(String username, Pageable pageable) {
-        log.debug("Listing videos for user: {} with pageable: {}", username, pageable);
         return videoRepository.findByOwnerUsername(username, pageable);
     }
 
