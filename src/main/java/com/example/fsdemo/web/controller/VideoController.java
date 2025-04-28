@@ -64,7 +64,6 @@ public class VideoController {
     @GetMapping
     public ResponseEntity<Page<VideoResponse>> listUserVideos(Authentication authentication, Pageable pageable) {
         String username = authentication.getName();
-        log.debug("List videos request received for user: {} with pageable: {}", username, pageable);
         Page<Video> userVideosPage = videoManagementService.listUserVideos(username, pageable);
         Page<VideoResponse> responseDtoPage = userVideosPage.map(VideoResponse::fromEntity);
         log.info("Returning page {} of {} videos for user: {}",
