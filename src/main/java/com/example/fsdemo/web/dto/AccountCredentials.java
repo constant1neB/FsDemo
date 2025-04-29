@@ -1,4 +1,4 @@
-package com.example.fsdemo.domain;
+package com.example.fsdemo.web.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;

@@ -1,6 +1,6 @@
 package com.example.fsdemo.web.controller;
 
-import com.example.fsdemo.domain.AccountCredentials;
+import com.example.fsdemo.web.dto.AccountCredentials;
 import com.example.fsdemo.security.JwtService;
 import com.example.fsdemo.service.UserService;
 import com.example.fsdemo.web.dto.RegistrationRequest;
