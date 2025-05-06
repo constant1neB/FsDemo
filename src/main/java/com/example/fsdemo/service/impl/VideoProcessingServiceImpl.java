@@ -4,21 +4,18 @@ import com.example.fsdemo.domain.Video;
 import com.example.fsdemo.exceptions.FfmpegProcessingException;
 import com.example.fsdemo.exceptions.VideoStorageException;
 import com.example.fsdemo.repository.VideoRepository;
+import com.example.fsdemo.service.FfmpegService;
 import com.example.fsdemo.service.VideoProcessingService;
 import com.example.fsdemo.service.VideoStorageService;
 import com.example.fsdemo.service.VideoStatusUpdater;
 import com.example.fsdemo.web.dto.EditOptions;
 import jakarta.annotation.PostConstruct;
-import net.bramp.ffmpeg.FFmpegExecutor;
 import net.bramp.ffmpeg.builder.FFmpegBuilder;
-import net.bramp.ffmpeg.builder.FFmpegOutputBuilder;
-import net.bramp.ffmpeg.job.FFmpegJob;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
-import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -45,11 +42,9 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
     private final VideoRepository videoRepository;
     private final VideoStorageService videoStorageService;
     private final VideoStatusUpdater videoStatusUpdater;
-    private final FFmpegExecutor ffmpegExecutor;
-    private final AsyncTaskExecutor asyncTaskExecutor;
+    private final FfmpegService ffmpegService;
     private final Path processedStorageLocation;
     private final Path temporaryStorageLocation;
-    private final long ffmpegTimeoutSeconds;
 
     private record TempFiles(Path inputPath, Path outputPath) {}
 
@@ -58,20 +53,16 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
             VideoRepository videoRepository,
             VideoStorageService videoStorageService,
             VideoStatusUpdater videoStatusUpdater,
-            FFmpegExecutor ffmpegExecutor,
-            AsyncTaskExecutor asyncTaskExecutor,
+            FfmpegService ffmpegService,
             @Value("${video.storage.processed.path}") String processedPath,
-            @Value("${video.storage.temp.path}") String tempPath,
-            @Value("${ffmpeg.timeout.seconds:120}") long ffmpegTimeoutSeconds
+            @Value("${video.storage.temp.path}") String tempPath
     ) {
         this.videoRepository = videoRepository;
         this.videoStorageService = videoStorageService;
         this.videoStatusUpdater = videoStatusUpdater;
-        this.ffmpegExecutor = ffmpegExecutor;
-        this.asyncTaskExecutor = asyncTaskExecutor;
+        this.ffmpegService = ffmpegService;
         this.processedStorageLocation = validateStoragePath(processedPath, "Processed storage");
         this.temporaryStorageLocation = validateStoragePath(tempPath, "Temporary storage");
-        this.ffmpegTimeoutSeconds = ffmpegTimeoutSeconds;
     }
 
     @PostConstruct
@@ -107,21 +98,28 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
         boolean processingSucceeded = false;
         try {
             tempFiles = prepareTemporaryFiles(video, videoId, txName);
-            FFmpegBuilder builder = buildFFmpegCommand(tempFiles.inputPath(), tempFiles.outputPath(), options, videoId, txName);
-            executeFFmpegJobWithTimeout(builder, videoId, txName);
+
+            FFmpegBuilder builder = ffmpegService.buildFfmpegCommand(
+                    tempFiles.inputPath(), tempFiles.outputPath(), options, videoId, txName);
+            ffmpegService.executeFfmpegJob(builder, videoId, txName);
+
             handleSuccessfulProcessing(tempFiles.outputPath(), videoId, txName);
             processingSucceeded = true;
 
-        } catch (Exception e) {
+        } catch (FfmpegProcessingException | TimeoutException | InterruptedException e) {
             handleProcessingFailure(videoId, e, txName);
-
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
-                throw new FfmpegProcessingException("Video processing was interrupted for video ID " + videoId, e);
             }
-
             throw new FfmpegProcessingException("Video processing failed for video ID " + videoId, e);
 
+        } catch (VideoStorageException | IOException e) {
+            handleProcessingFailure(videoId, e, txName);
+            throw new FfmpegProcessingException("Video processing failed due to file operation for video ID " + videoId, e);
+
+        } catch (Exception e) {
+            handleProcessingFailure(videoId, e, txName);
+            throw new FfmpegProcessingException("Unexpected error during video processing for video ID " + videoId, e);
         } finally {
             if (tempFiles != null) {
                 cleanupTemporaryFiles(tempFiles.inputPath(), tempFiles.outputPath(), processingSucceeded, videoId, txName);
@@ -129,75 +127,8 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
         }
     }
 
-    private FFmpegBuilder buildFFmpegCommand(Path tempInputPath, Path tempOutputPath, EditOptions options, Long videoId, String txName) {
-        log.debug("[Async][TX:{}] Building FFmpeg command for video ID: {}", txName, videoId);
-        FFmpegBuilder builder = new FFmpegBuilder()
-                .setVerbosity(FFmpegBuilder.Verbosity.INFO)
-                .overrideOutputFiles(true);
-
-        configureInput(builder, tempInputPath, options);
-
-        FFmpegOutputBuilder outputBuilder = builder.addOutput(tempOutputPath.toString());
-        configureOutput(outputBuilder, options, videoId, txName);
-        outputBuilder.done();
-
-        if (log.isDebugEnabled()) {
-            log.debug("[Async][TX:{}] FFmpeg command (bramp): {}", txName, String.join(" ", builder.build()));
-        }
-        return builder;
-    }
-
-    private void configureInput(FFmpegBuilder builder, Path tempInputPath, EditOptions options) {
-        if (options.cutStartTime() != null && options.cutStartTime() >= 0) {
-            builder.setStartOffset(options.cutStartTime().longValue(), TimeUnit.SECONDS);
-        }
-        builder.addInput(tempInputPath.toString());
-    }
-
-    private void configureOutput(FFmpegOutputBuilder outputBuilder, EditOptions options, Long videoId, String txName) {
-        configureOutputDuration(outputBuilder, options, videoId, txName);
-        configureOutputResolution(outputBuilder, options);
-        configureOutputAudio(outputBuilder, options);
-        configureOutputVideoCodec(outputBuilder);
-    }
-
-    private void configureOutputDuration(FFmpegOutputBuilder outputBuilder, EditOptions options, Long videoId, String txName) {
-        Double cutStartTime = options.cutStartTime();
-        Double cutEndTime = options.cutEndTime();
-
-        if (cutEndTime != null && cutEndTime >= 0) {
-            double effectiveStartTime = (cutStartTime != null && cutStartTime >= 0) ? cutStartTime : 0.0;
-            if (cutEndTime > effectiveStartTime) {
-                double duration = cutEndTime - effectiveStartTime;
-                outputBuilder.setDuration((long) (duration * 1000), TimeUnit.MILLISECONDS);
-            } else {
-                log.warn("[Async][TX:{}] Cut end time ({}) is not after cut start time ({}), ignoring end time for output duration for video ID: {}.",
-                        txName, cutEndTime, effectiveStartTime, videoId);
-            }
-        }
-    }
-
-    private void configureOutputResolution(FFmpegOutputBuilder outputBuilder, EditOptions options) {
-        if (options.targetResolutionHeight() != null && options.targetResolutionHeight() > 0) {
-            outputBuilder.setVideoResolution(-2, options.targetResolutionHeight());
-        }
-    }
-
-    private void configureOutputAudio(FFmpegOutputBuilder outputBuilder, EditOptions options) {
-        outputBuilder.setAudioCodec("copy");
-        if (options.mute() != null && options.mute()) {
-            outputBuilder.disableAudio();
-        }
-    }
-
-    private void configureOutputVideoCodec(FFmpegOutputBuilder outputBuilder) {
-        outputBuilder.setVideoCodec("libx265")
-                .addExtraArgs("-tag:v", "hvc1")
-                .setPreset("medium")
-                .setConstantRateFactor(23);
-    }
-
-    private TempFiles prepareTemporaryFiles(Video video, Long videoId, String txName) throws IOException, VideoStorageException {
+    private TempFiles prepareTemporaryFiles(Video video, Long videoId, String txName)
+            throws IOException, VideoStorageException {
         log.debug("[Async][TX:{}] Preparing temporary files for video ID: {}", txName, videoId);
         Resource originalResource = videoStorageService.load(video.getStoragePath());
         if (!originalResource.exists() || !originalResource.isReadable()) {
@@ -223,43 +154,6 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
         return new TempFiles(tempInputPath, tempOutputPath);
     }
 
-    private void executeFFmpegJobWithTimeout(FFmpegBuilder builder, Long videoId, String txName)
-            throws FfmpegProcessingException, TimeoutException, InterruptedException {
-        log.info("[Async][TX:{}] Submitting FFmpeg job for video ID: {}", txName, videoId);
-        FFmpegJob job = ffmpegExecutor.createJob(builder);
-        Future<?> ffmpegExecutionFuture = asyncTaskExecutor.submit(job);
-
-        try {
-            ffmpegExecutionFuture.get(this.ffmpegTimeoutSeconds, TimeUnit.SECONDS);
-            log.info("[Async][TX:{}] FFmpeg job completed successfully (within timeout) for video ID: {}", txName, videoId);
-
-        } catch (TimeoutException | InterruptedException e) {
-            ffmpegExecutionFuture.cancel(true);
-            throw e;
-
-        } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
-            log.error("[Async][TX:{}] Exception during FFmpeg execution for video ID: {}", txName, videoId, cause);
-
-            String errorMessage;
-            String stderr = null;
-            int exitCode = -1;
-
-            if (cause instanceof RuntimeException && cause.getCause() instanceof IOException ioCause) {
-                errorMessage = "IO Error during FFmpeg execution for video ID " + videoId + ": " + ioCause.getMessage();
-                stderr = ioCause.getMessage();
-                cause = ioCause;
-            } else if (cause != null) {
-                errorMessage = "Unexpected cause during FFmpeg execution for video ID " + videoId + ": " + cause.getMessage();
-                stderr = cause.getMessage();
-            } else {
-                errorMessage = "Unknown error during FFmpeg execution for video ID " + videoId;
-            }
-            throw new FfmpegProcessingException(errorMessage, cause, exitCode, stderr);
-
-        }
-    }
-
     private void handleSuccessfulProcessing(Path tempOutputPath, Long videoId, String txName)
             throws IOException, VideoStorageException {
         log.debug("[Async][TX:{}] Handling successful processing for video ID: {}", txName, videoId);
@@ -281,13 +175,22 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
     }
 
     private void handleProcessingFailure(Long videoId, Throwable failureCause, String txName) {
-        if (!(failureCause instanceof TimeoutException || failureCause instanceof ExecutionException ||
-                failureCause instanceof InterruptedException)) {
-            log.error("[Async][TX:{}] Processing failed for video ID: {}. Reason: {}",
-                    txName, videoId, failureCause.getMessage(), failureCause);
-        } else {
-            log.error("[Async][TX:{}] Processing failed for video ID: {}. Reason: {}",
-                    txName, videoId, failureCause.getMessage());
+        switch (failureCause) {
+            case TimeoutException e ->
+                    log.error("[Async][TX:{}] Processing timed out for video ID: {}. Reason: {}",
+                            txName, videoId, e.getMessage());
+            case FfmpegProcessingException fpe ->
+                    log.error("[Async][TX:{}] FFmpeg processing failed for video ID: {}. Reason: {}. Details: ",
+                            txName, videoId, fpe.getMessage(), fpe);
+
+            case InterruptedException e -> {
+                log.warn("[Async][TX:{}] Processing was interrupted for video ID: {}. Reason: {}",
+                        txName, videoId, e.getMessage());
+                Thread.currentThread().interrupt();
+            }
+            case null, default ->
+                    log.error("[Async][TX:{}] Generic processing failure for video ID: {}.",
+                            txName, videoId, failureCause);
         }
         videoStatusUpdater.updateStatusToFailed(videoId);
     }
@@ -295,35 +198,41 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
     private void cleanupTemporaryFiles(Path tempInputPath, Path tempOutputPath,
                                        boolean processingSucceeded, Long videoId, String txName) {
         log.debug("[Async][TX:{}] Cleaning up temporary files for video ID: {}", txName, videoId);
-        cleanupTempFile(tempInputPath, videoId, "input");
+        cleanupTempFile(tempInputPath, videoId, "input", txName);
 
         if (!processingSucceeded && tempOutputPath != null) {
-            cleanupTempFile(tempOutputPath, videoId, "output (failed or timed out)");
+            cleanupTempFile(tempOutputPath, videoId, "output (failed or timed out)", txName);
         } else if (tempOutputPath != null) {
-            log.trace("[Async][TX:{}] Temporary output file {} was moved, not cleaning up.", txName, tempOutputPath);
+            log.trace("[Async][TX:{}] Temporary output file {} was (expectedly) moved or already cleaned up for video ID: {}.",
+                    txName, tempOutputPath, videoId);
+            if (Files.exists(tempOutputPath)) {
+                log.warn("[Async][TX:{}] Temporary output file {} still exists after successful processing for video ID: {}. Attempting cleanup.",
+                        txName, tempOutputPath, videoId);
+                cleanupTempFile(tempOutputPath, videoId, "output (unexpectedly present after success)", txName);
+            }
         }
     }
 
-    private void cleanupTempFile(Path tempPath, Long videoId, String type) {
+    private void cleanupTempFile(Path tempPath, Long videoId, String type, String txName) {
         if (tempPath != null) {
             try {
                 if (Files.exists(tempPath)) {
                     Files.delete(tempPath);
-                    log.debug("[Async] Deleted temporary {} file for video {}: {}",
-                            type, videoId, tempPath);
+                    log.debug("[Async][TX:{}] Deleted temporary {} file for video {}: {}",
+                            txName, type, videoId, tempPath);
                 } else {
-                    log.debug("[Async] Temporary {} file for video {} not found for deletion (already deleted or never created): {}",
-                            type, videoId, tempPath);
+                    log.debug("[Async][TX:{}] Temporary {} file for video {} not found for deletion (already deleted or never created): {}",
+                            txName, type, videoId, tempPath);
                 }
             } catch (IOException ioEx) {
-                log.error("[Async] Failed to delete temporary {} file for video {}: {}",
-                        type, videoId, tempPath, ioEx);
+                log.error("[Async][TX:{}] Failed to delete temporary {} file for video {}: {}",
+                        txName, type, videoId, tempPath, ioEx);
             } catch (Exception e) {
-                log.error("[Async] Unexpected error cleaning up temporary {} file for video {}: {}",
-                        type, videoId, tempPath, e);
+                log.error("[Async][TX:{}] Unexpected error cleaning up temporary {} file for video {}: {}",
+                        txName, type, videoId, tempPath, e);
             }
         } else {
-            log.trace("[Async] Temporary {} path was null for video {}, skipping cleanup.", type, videoId);
+            log.trace("[Async][TX:{}] Temporary {} path was null for video {}, skipping cleanup.", txName, type, videoId);
         }
     }
 

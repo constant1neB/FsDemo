@@ -1,6 +1,6 @@
 package com.example.fsdemo.config;
 
-import com.example.fsdemo.exceptions.FFmpegInitializationException;
+import com.example.fsdemo.exceptions.FfmpegInitializationException;
 import net.bramp.ffmpeg.FFmpeg;
 import net.bramp.ffmpeg.FFmpegExecutor;
 import net.bramp.ffmpeg.FFprobe;
@@ -14,9 +14,9 @@ import org.springframework.context.annotation.Configuration;
 import java.io.IOException;
 
 @Configuration
-public class FFmpegConfig {
+public class FfmpegConfig {
 
-    private static final Logger log = LoggerFactory.getLogger(FFmpegConfig.class);
+    private static final Logger log = LoggerFactory.getLogger(FfmpegConfig.class);
 
     @Value("${ffmpeg.path}")
     private String ffmpegPath;
@@ -28,15 +28,15 @@ public class FFmpegConfig {
     public FFmpeg fFmpeg() {
         if (ffmpegPath == null || ffmpegPath.isBlank()) {
             log.error("ffmpeg.path is not configured. FFmpeg cannot be initialized.");
-            throw new FFmpegInitializationException("ffmpeg.path is required but not configured.", null);
+            throw new FfmpegInitializationException("ffmpeg.path is required but not configured.", null);
         }
         try {
             log.info("Creating FFmpeg bean with path: {}", ffmpegPath);
             return new FFmpeg(ffmpegPath);
         } catch (IOException e) {
-            throw new FFmpegInitializationException("Failed to initialize FFmpeg with path: " + ffmpegPath, e);
+            throw new FfmpegInitializationException("Failed to initialize FFmpeg with path: " + ffmpegPath, e);
         } catch (IllegalArgumentException e) {
-            throw new FFmpegInitializationException("Invalid configuration for FFmpeg path: " + ffmpegPath, e);
+            throw new FfmpegInitializationException("Invalid configuration for FFmpeg path: " + ffmpegPath, e);
         }
     }
 
@@ -50,9 +50,9 @@ public class FFmpegConfig {
             log.info("Creating FFprobe bean with path: {}", ffprobePath);
             return new FFprobe(ffprobePath);
         } catch (IOException e) {
-            throw new FFmpegInitializationException("Failed to initialize FFprobe with path: " + ffprobePath, e);
+            throw new FfmpegInitializationException("Failed to initialize FFprobe with path: " + ffprobePath, e);
         } catch (IllegalArgumentException e) {
-            throw new FFmpegInitializationException("Invalid configuration for FFprobe path: " + ffprobePath, e);
+            throw new FfmpegInitializationException("Invalid configuration for FFprobe path: " + ffprobePath, e);
         }
     }
 
