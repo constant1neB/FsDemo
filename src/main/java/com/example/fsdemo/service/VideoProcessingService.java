@@ -5,11 +5,14 @@ import com.example.fsdemo.web.dto.EditOptions;
 public interface VideoProcessingService {
 
     /**
-     * Asynchronously processes video edits based on the provided options.
-     * This method should run in a background thread. Any exceptions during
-     * the async processing (like IO, timeouts, or FFmpeg errors) will be
-     * handled internally (e.g., logged, video status set to FAILED) or
-     * potentially caught by the global async exception handler.
+     * Asynchronously orchestrates the video editing process based on the provided options.
+     * This method is designed to run in a background thread.
+     * During processing, it manages temporary files and updates the video's status
+     * (e.g., to PROCESSING, READY, or FAILED).
+     * If exceptions occur during async processing (like IO, timeouts, or FFmpeg errors),
+     * they are logged, the video status is updated to FAILED, and then a
+     * FfmpegProcessingException is re-thrown.This re-thrown exception is
+     * typically caught by the application's global AsyncUncaughtExceptionHandler.
      *
      * @param videoId  The ID of the video to process.
      * @param options  The editing options (cut times, mute, resolution, etc.).
