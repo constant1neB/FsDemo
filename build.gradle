@@ -13,6 +13,10 @@ java {
 	}
 }
 
+bootRun {
+	 jvmArgs = ["-Xms2g", "-Xmx2g", "-XX:+UseZGC"]
+}
+
 repositories {
 	mavenCentral()
 }
