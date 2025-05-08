@@ -249,7 +249,7 @@ class VideoProcessingServiceImplTest {
 
     @Test
     @DisplayName("❌ processVideoEdits: IOException during temp file prep (load) - updates status to FAILED, re-throws as FfmpegProcessingException")
-    void processVideoEdits_IOExceptionOnLoad_UpdatesStatusToFailedAndThrows() throws Exception {
+    void processVideoEdits_IOExceptionOnLoad_UpdatesStatusToFailedAndThrows() {
         VideoStorageException loadException = new VideoStorageException("Cannot load original");
         given(videoRepository.findById(videoId)).willReturn(Optional.of(testVideo));
         given(videoStorageService.load(originalStoragePath)).willThrow(loadException);
