@@ -51,12 +51,6 @@ public class VideoStatusUpdaterImpl implements VideoStatusUpdater {
                     return new IllegalStateException("Video not found: " + videoId);
                 });
 
-        if (!ALLOWED_START_PROCESSING_STATUSES.contains(video.getStatus())) {
-            log.warn("[StatusUpdater][TX:{}] Video {} cannot transition to PROCESSING from state {}.",
-                    txName, videoId, video.getStatus());
-            throw new IllegalStateException("Video cannot be processed in its current state: " + video.getStatus());
-        }
-
         AppUser owner = video.getOwner();
         String username = (owner != null) ? owner.getUsername() : null;
         String publicId = video.getPublicId();
@@ -65,6 +59,12 @@ public class VideoStatusUpdaterImpl implements VideoStatusUpdater {
             log.warn("[StatusUpdater][TX:{}] Video {} is already PROCESSING. No status change needed.", txName, videoId);
             publishEvent(publicId, username, VideoStatus.PROCESSING, null);
             return;
+        }
+
+        if (!ALLOWED_START_PROCESSING_STATUSES.contains(video.getStatus())) {
+            log.warn("[StatusUpdater][TX:{}] Video {} cannot transition to PROCESSING from state {}.",
+                    txName, videoId, video.getStatus());
+            throw new IllegalStateException("Video cannot be processed in its current state: " + video.getStatus());
         }
 
         cleanupPreviousProcessedFile(video, txName);

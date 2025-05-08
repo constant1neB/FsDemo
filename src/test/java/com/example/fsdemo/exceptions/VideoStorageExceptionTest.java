@@ -25,7 +25,7 @@ class VideoStorageExceptionTest {
     @DisplayName("Constructor (message, cause) should set message and cause correctly")
     void constructorWithMessageAndCause() {
         String message = "Failed to delete video file due to permissions.";
-        Throwable cause = new AccessDeniedException("permission denied"); // Example cause
+        Throwable cause = new AccessDeniedException("permission denied");
         VideoStorageException ex = new VideoStorageException(message, cause);
 
         assertThat(ex.getMessage()).isEqualTo(message);
@@ -36,7 +36,7 @@ class VideoStorageExceptionTest {
     @DisplayName("Should accept different types of Throwables as cause")
     void constructorWithDifferentCauseType() {
         String message = "Failed to read video file.";
-        Throwable cause = new IOException("Disk read error"); // Another example cause
+        Throwable cause = new IOException("Disk read error");
         VideoStorageException ex = new VideoStorageException(message, cause);
 
         assertThat(ex.getMessage()).isEqualTo(message);

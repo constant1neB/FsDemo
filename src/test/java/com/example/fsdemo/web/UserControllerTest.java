@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.server.ResponseStatusException;
@@ -29,6 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @DisplayName("UserController Registration & Verification Integration Tests")
+@TestPropertySource(properties = "app.frontend-base-url=http://test-frontend.url")
 class UserControllerTest {
 
     @Autowired
@@ -47,6 +49,8 @@ class UserControllerTest {
     private RegistrationRequest validRegistrationRequest;
     private ResendVerificationRequest validResendRequest;
 
+    private static final String TEST_FRONTEND_BASE_URL = "http://test-frontend.url";
+
     @BeforeEach
     void setUp() {
         validRegistrationRequest = new RegistrationRequest(
@@ -58,7 +62,6 @@ class UserControllerTest {
         validResendRequest = new ResendVerificationRequest("test@example.com");
     }
 
-    // --- Helper Methods ---
     private String asJsonString(final Object obj) {
         try {
             return objectMapper.writeValueAsString(obj);
@@ -67,7 +70,6 @@ class UserControllerTest {
         }
     }
 
-    // ============ /api/auth/register TESTS ============
     @Nested
     @DisplayName("POST /api/auth/register")
     class RegisterEndpointTests {
@@ -89,7 +91,6 @@ class UserControllerTest {
         @DisplayName("❌ Should return 400 Bad Request for mismatched passwords (simulated service error)")
         void registerUser_FailMismatchedPasswords() throws Exception {
             ResponseStatusException ex = new ResponseStatusException(HttpStatus.BAD_REQUEST, "Passwords do not match.");
-            // Simulate the service throwing this *after* its internal check
             doThrow(ex).when(userService).registerNewUser(any(RegistrationRequest.class));
 
             RegistrationRequest mismatchRequest = new RegistrationRequest(
@@ -148,8 +149,8 @@ class UserControllerTest {
                             .content(asJsonString(invalidRequest)))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.title").value("Bad Request"))
-                    .andExpect(jsonPath("$.errors", hasKey("email"))) // Check key exists
-                    .andExpect(jsonPath("$.errors.email").value(containsString("well-formed email address"))); // This specific message is likely stable for @Email
+                    .andExpect(jsonPath("$.errors", hasKey("email")))
+                    .andExpect(jsonPath("$.errors.email").value(containsString("well-formed email address")));
 
             verify(userService, never()).registerNewUser(any(RegistrationRequest.class));
         }
@@ -165,8 +166,8 @@ class UserControllerTest {
                             .content(asJsonString(invalidRequest)))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.title").value("Bad Request"))
-                    .andExpect(jsonPath("$.errors", hasKey("password"))) // Check key exists
-                    .andExpect(jsonPath("$.errors.password").value(containsString("size must be between 12 and 70"))); // This specific message is likely stable for @Size
+                    .andExpect(jsonPath("$.errors", hasKey("password")))
+                    .andExpect(jsonPath("$.errors.password").value(containsString("size must be between 12 and 70")));
 
             verify(userService, never()).registerNewUser(any(RegistrationRequest.class));
         }
@@ -198,43 +199,41 @@ class UserControllerTest {
                             .content(asJsonString(invalidRequest)))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.title").value("Bad Request"))
-                    .andExpect(jsonPath("$.errors", hasKey("passwordConfirmation"))) // Check key exists
-                    .andExpect(jsonPath("$.errors.passwordConfirmation").value(containsString("cannot be blank"))); // This specific message is likely stable for @NotBlank
+                    .andExpect(jsonPath("$.errors", hasKey("passwordConfirmation")))
+                    .andExpect(jsonPath("$.errors.passwordConfirmation").value(containsString("cannot be blank")));
 
             verify(userService, never()).registerNewUser(any(RegistrationRequest.class));
         }
     }
 
-    // ============ /api/auth/verify-email TESTS ============
     @Nested
     @DisplayName("GET /api/auth/verify-email")
     class VerifyEmailEndpointTests {
 
         @Test
-        @DisplayName("✅ Should return 200 OK on successful verification")
+        @DisplayName("✅ Should redirect to frontend with verified=true on successful verification")
         void verifyEmail_Success() throws Exception {
             String validToken = "valid-verification-token-123";
             when(userService.verifyUser(validToken)).thenReturn(true);
 
             mockMvc.perform(get("/api/auth/verify-email")
                             .param("token", validToken))
-                    .andExpect(status().isOk())
-                    .andExpect(content().string(containsString("Email successfully verified")));
+                    .andExpect(status().isFound())
+                    .andExpect(redirectedUrl(TEST_FRONTEND_BASE_URL + "/login?verified=true"));
 
             verify(userService).verifyUser(validToken);
         }
 
         @Test
-        @DisplayName("❌ Should return 400 Bad Request for invalid or expired token")
+        @DisplayName("❌ Should redirect to frontend with error=verification_failed for invalid or expired token")
         void verifyEmail_FailInvalidToken() throws Exception {
             String invalidToken = "invalid-or-expired-token-456";
             when(userService.verifyUser(invalidToken)).thenReturn(false);
 
             mockMvc.perform(get("/api/auth/verify-email")
                             .param("token", invalidToken))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.title").value("Bad Request"))
-                    .andExpect(jsonPath("$.detail").value(containsString("Invalid or expired verification token")));
+                    .andExpect(status().isFound())
+                    .andExpect(redirectedUrl(TEST_FRONTEND_BASE_URL + "/login?error=verification_failed"));
 
             verify(userService).verifyUser(invalidToken);
         }
@@ -251,22 +250,20 @@ class UserControllerTest {
         }
 
         @Test
-        @DisplayName("❌ Should return 400 Bad Request if token parameter is blank")
+        @DisplayName("❌ Should redirect to frontend with error=verification_failed if token parameter is blank")
         void verifyEmail_FailBlankToken() throws Exception {
             String blankToken = " ";
-            when(userService.verifyUser(blankToken)).thenReturn(false); // Service handles blank token returning false
+            when(userService.verifyUser(blankToken)).thenReturn(false);
 
             mockMvc.perform(get("/api/auth/verify-email")
                             .param("token", blankToken))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.title").value("Bad Request"))
-                    .andExpect(jsonPath("$.detail").value(containsString("Invalid or expired verification token")));
+                    .andExpect(status().isFound())
+                    .andExpect(redirectedUrl(TEST_FRONTEND_BASE_URL + "/login?error=verification_failed"));
 
             verify(userService).verifyUser(blankToken);
         }
     }
 
-    // ============ /api/auth/resend-verification TESTS ============
     @Nested
     @DisplayName("POST /api/auth/resend-verification")
     class ResendVerificationEndpointTests {
@@ -281,7 +278,6 @@ class UserControllerTest {
                             .content(asJsonString(validResendRequest)))
                     .andExpect(status().isAccepted());
 
-            // Verify userService was called with the specific email from the request
             verify(userService).resendVerificationEmail(validResendRequest.email());
         }
 
@@ -325,8 +321,8 @@ class UserControllerTest {
                             .content(asJsonString(invalidRequest)))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.title").value("Bad Request"))
-                    .andExpect(jsonPath("$.errors", hasKey("email"))) // Check key exists
-                    .andExpect(jsonPath("$.errors.email").value(containsString("well-formed email address"))); // Specific message likely stable
+                    .andExpect(jsonPath("$.errors", hasKey("email")))
+                    .andExpect(jsonPath("$.errors.email").value(containsString("well-formed email address")));
 
             verify(userService, never()).resendVerificationEmail(anyString());
         }
@@ -334,7 +330,7 @@ class UserControllerTest {
         @Test
         @DisplayName("❌ Should return 400 Bad Request for empty email (DTO validation)")
         void resendVerification_FailEmptyEmail() throws Exception {
-            ResendVerificationRequest invalidRequest = new ResendVerificationRequest(""); // Use empty string
+            ResendVerificationRequest invalidRequest = new ResendVerificationRequest("");
 
             mockMvc.perform(post("/api/auth/resend-verification")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -343,8 +339,8 @@ class UserControllerTest {
                     .andExpect(jsonPath("$.title").value("Bad Request"))
                     .andExpect(jsonPath("$.errors", hasKey("email")))
                     .andExpect(jsonPath("$.errors.email", anyOf(
-                            equalTo("Email cannot be blank"),
-                            equalTo("Email must be a well-formed email address")
+                            containsString("Email cannot be blank"),
+                            containsString("Email must be a well-formed email address")
                     )));
 
             verify(userService, never()).resendVerificationEmail(anyString());

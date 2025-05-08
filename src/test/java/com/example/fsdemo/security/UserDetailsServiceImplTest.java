@@ -40,25 +40,22 @@ class UserDetailsServiceImplTest {
         verifiedUser.setVerified(true);
 
         unverifiedUser = new AppUser(username, password, role, "test@example.com");
-        unverifiedUser.setVerified(false); // Explicitly unverified
+        unverifiedUser.setVerified(false);
     }
 
     @Test
     @DisplayName("loadUserByUsername should return UserDetails for verified user")
     void loadUserByUsername_SuccessVerifiedUser() {
-        // Arrange
         given(repository.findByUsername(username)).willReturn(Optional.of(verifiedUser));
 
-        // Act
         UserDetails userDetails = service.loadUserByUsername(username);
 
-        // Assert
         assertThat(userDetails).isNotNull();
         assertThat(userDetails.getUsername()).isEqualTo(username);
         assertThat(userDetails.getPassword()).isEqualTo(password);
         assertThat(userDetails.getAuthorities()).hasSize(1);
         assertThat(userDetails.getAuthorities().iterator().next().getAuthority()).isEqualTo("ROLE_" + role);
-        assertThat(userDetails.isEnabled()).isTrue(); // Default User builder sets this
+        assertThat(userDetails.isEnabled()).isTrue();
         assertThat(userDetails.isAccountNonExpired()).isTrue();
         assertThat(userDetails.isCredentialsNonExpired()).isTrue();
         assertThat(userDetails.isAccountNonLocked()).isTrue();
@@ -69,10 +66,8 @@ class UserDetailsServiceImplTest {
     @Test
     @DisplayName("loadUserByUsername should throw UsernameNotFoundException if user not found")
     void loadUserByUsername_FailUserNotFound() {
-        // Arrange
         given(repository.findByUsername(username)).willReturn(Optional.empty());
 
-        // Act & Assert
         assertThatExceptionOfType(UsernameNotFoundException.class)
                 .isThrownBy(() -> service.loadUserByUsername(username))
                 .withMessage("User not found: " + username);
@@ -83,10 +78,8 @@ class UserDetailsServiceImplTest {
     @Test
     @DisplayName("loadUserByUsername should throw DisabledException if user is not verified")
     void loadUserByUsername_FailUserNotVerified() {
-        // Arrange
         given(repository.findByUsername(username)).willReturn(Optional.of(unverifiedUser));
 
-        // Act & Assert
         assertThatExceptionOfType(DisabledException.class)
                 .isThrownBy(() -> service.loadUserByUsername(username))
                 .withMessage("User account is not verified. Please check your email.");

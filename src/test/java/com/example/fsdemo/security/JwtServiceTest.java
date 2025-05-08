@@ -1,6 +1,3 @@
-// src/test/java/com/example/fsdemo/security/JwtServiceTest.java
-// MODIFY EXISTING FILE
-
 package com.example.fsdemo.security;
 
 import io.jsonwebtoken.Claims;
@@ -32,28 +29,23 @@ class JwtServiceTest {
     private final String username = "testuser";
     private final String fingerprint = "user-specific-browser-fingerprint-string";
     private String fingerprintHash;
-    private SecretKey key; // For creating expired/invalid tokens manually
+    private SecretKey key;
 
     @BeforeEach
     void setUp() {
-        // Construct first, initialize in tests where needed or here if always valid base setup
         fingerprintHash = JwtService.hashFingerprint(fingerprint);
         key = Keys.hmacShaKeyFor(Base64.getDecoder().decode(base64Secret));
-        // Initialize the service for most tests
         jwtService = new JwtService(base64Secret, expirationMs, issuer);
-        initializeJwtService(jwtService); // Use helper
+        initializeJwtService(jwtService);
     }
 
-    // Helper to invoke initializeKey via reflection
     private void initializeJwtService(JwtService service) {
         try {
             java.lang.reflect.Method initMethod = JwtService.class.getDeclaredMethod("initializeKey");
             initMethod.setAccessible(true);
             initMethod.invoke(service);
         } catch (Exception e) {
-            // If initialization fails here, it might be expected in some tests
             if (e instanceof InvocationTargetException ite) {
-                // Propagate the cause for assertion checking in tests
                 if (ite.getCause() instanceof RuntimeException re) {
                     throw re;
                 } else if (ite.getCause() instanceof Error err) {
@@ -72,20 +64,18 @@ class JwtServiceTest {
         @Test
         @DisplayName("Should initialize successfully with valid parameters")
         void initialization_Success() {
-            // Setup in outer @BeforeEach covers this, just assert no exception during setup
             assertThatCode(() -> {
                 JwtService service = new JwtService(base64Secret, expirationMs, issuer);
-                initializeJwtService(service); // Call helper
+                initializeJwtService(service);
             }).doesNotThrowAnyException();
         }
 
         @Test
         @DisplayName("Should throw IllegalArgumentException for missing secret during initialization")
         void initialization_FailMissingSecret() {
-            // Constructor doesn't check secret, initializeKey does
             JwtService service = new JwtService(null, expirationMs, issuer);
             assertThatIllegalArgumentException()
-                    .isThrownBy(() -> initializeJwtService(service)) // Check during initialization
+                    .isThrownBy(() -> initializeJwtService(service))
                     .withMessageContaining("JWT Secret Key (jwt.secret.key.base64) must be provided");
         }
 
@@ -94,7 +84,7 @@ class JwtServiceTest {
         void initialization_FailBlankSecret() {
             JwtService service = new JwtService("   ", expirationMs, issuer);
             assertThatIllegalArgumentException()
-                    .isThrownBy(() -> initializeJwtService(service)) // Check during initialization
+                    .isThrownBy(() -> initializeJwtService(service))
                     .withMessageContaining("JWT Secret Key (jwt.secret.key.base64) must be provided");
         }
 
@@ -104,7 +94,7 @@ class JwtServiceTest {
             String shortSecret = Base64.getEncoder().encodeToString("short".getBytes());
             JwtService service = new JwtService(shortSecret, expirationMs, issuer);
             assertThatIllegalArgumentException()
-                    .isThrownBy(() -> initializeJwtService(service)) // Check during initialization
+                    .isThrownBy(() -> initializeJwtService(service))
                     .withMessageContaining("JWT Secret key must be at least 256 bits (32 bytes)");
         }
 
@@ -113,7 +103,7 @@ class JwtServiceTest {
         void initialization_FailInvalidBase64() {
             JwtService service = new JwtService("Invalid Base64 $$$", expirationMs, issuer);
             assertThatIllegalArgumentException()
-                    .isThrownBy(() -> initializeJwtService(service)) // Check during initialization
+                    .isThrownBy(() -> initializeJwtService(service))
                     .withMessageContaining("Invalid Base64 encoding for JWT secret key");
         }
 
@@ -121,7 +111,6 @@ class JwtServiceTest {
         @Test
         @DisplayName("Should throw IllegalArgumentException for missing issuer in constructor")
         void initialization_FailMissingIssuer() {
-            // This is checked in the constructor itself
             assertThatIllegalArgumentException()
                     .isThrownBy(() -> new JwtService(base64Secret, expirationMs, null))
                     .withMessageContaining("JWT Issuer (jwt.issuer) must not be null or empty");
@@ -252,7 +241,7 @@ class JwtServiceTest {
         @Test
         @DisplayName("Should return null if fingerprint cookie is missing")
         void validate_FailMissingCookie() {
-            request.setCookies(); // Remove cookie
+            request.setCookies();
             String resultUsername = jwtService.validateTokenAndGetUsername(request);
             assertThat(resultUsername).isNull();
         }
@@ -260,15 +249,15 @@ class JwtServiceTest {
         @Test
         @DisplayName("Should return null if token signature is invalid")
         void validate_FailInvalidSignature() {
-            // Use a different key for signing
-            SecretKey wrongKey = Keys.hmacShaKeyFor(Base64.getEncoder().encodeToString("DifferentSecretKeyForTestingSignatureFailure123".getBytes()).getBytes());
+            SecretKey wrongKey = Keys.hmacShaKeyFor(Base64.getEncoder().encodeToString(
+                    "DifferentSecretKeyForTestingSignatureFailure123".getBytes()).getBytes());
             String tokenWithWrongSig = Jwts.builder()
                     .subject(username)
                     .issuer(issuer)
                     .claim(JwtService.FINGERPRINT_CLAIM, fingerprintHash)
                     .issuedAt(Date.from(Instant.now()))
                     .expiration(Date.from(Instant.now().plus(Duration.ofMillis(expirationMs))))
-                    .signWith(wrongKey) // Signed with WRONG key
+                    .signWith(wrongKey)
                     .compact();
 
             request.removeHeader("Authorization");
@@ -285,8 +274,8 @@ class JwtServiceTest {
                     .subject(username)
                     .issuer(issuer)
                     .claim(JwtService.FINGERPRINT_CLAIM, fingerprintHash)
-                    .issuedAt(Date.from(Instant.now().minus(Duration.ofHours(2)))) // Issued 2 hours ago
-                    .expiration(Date.from(Instant.now().minus(Duration.ofHours(1)))) // Expired 1 hour ago
+                    .issuedAt(Date.from(Instant.now().minus(Duration.ofHours(2))))
+                    .expiration(Date.from(Instant.now().minus(Duration.ofHours(1))))
                     .signWith(key)
                     .compact();
             request.removeHeader("Authorization");
@@ -301,7 +290,7 @@ class JwtServiceTest {
         void validate_FailWrongIssuer() {
             String tokenWithWrongIssuer = Jwts.builder()
                     .subject(username)
-                    .issuer("WrongIssuer") // Incorrect issuer
+                    .issuer("WrongIssuer")
                     .claim(JwtService.FINGERPRINT_CLAIM, fingerprintHash)
                     .issuedAt(Date.from(Instant.now()))
                     .expiration(Date.from(Instant.now().plus(Duration.ofMillis(expirationMs))))
@@ -320,7 +309,6 @@ class JwtServiceTest {
             String tokenWithoutFingerprint = Jwts.builder()
                     .subject(username)
                     .issuer(issuer)
-                    // No fingerprint claim added
                     .issuedAt(Date.from(Instant.now()))
                     .expiration(Date.from(Instant.now().plus(Duration.ofMillis(expirationMs))))
                     .signWith(key)
@@ -338,7 +326,7 @@ class JwtServiceTest {
             String tokenWithBlankFingerprint = Jwts.builder()
                     .subject(username)
                     .issuer(issuer)
-                    .claim(JwtService.FINGERPRINT_CLAIM, "  ") // Blank claim
+                    .claim(JwtService.FINGERPRINT_CLAIM, "  ")
                     .issuedAt(Date.from(Instant.now()))
                     .expiration(Date.from(Instant.now().plus(Duration.ofMillis(expirationMs))))
                     .signWith(key)
@@ -353,7 +341,7 @@ class JwtServiceTest {
         @Test
         @DisplayName("Should return null if fingerprint from cookie doesn't match hash in token")
         void validate_FailFingerprintMismatch() {
-            request.setCookies(new Cookie(JwtService.FINGERPRINT_COOKIE_NAME, "different-fingerprint")); // Wrong fingerprint in cookie
+            request.setCookies(new Cookie(JwtService.FINGERPRINT_COOKIE_NAME, "different-fingerprint"));
 
             String resultUsername = jwtService.validateTokenAndGetUsername(request);
             assertThat(resultUsername).isNull();

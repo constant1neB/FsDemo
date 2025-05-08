@@ -51,24 +51,16 @@ class UserServiceImplTest {
     private final String testEmail = "test@example.com";
     private final String testPassword = "Password123!";
     private final String encodedPassword = "encodedPassword123";
-    private final String appBaseUrl = "http://localhost:8080/api/auth"; // Example base URL
+    private final String appBaseUrl = "http://localhost:8080/api/auth";
 
     @BeforeEach
     void setUp() {
-        // Common setup needed for almost all tests
         validRequest = new RegistrationRequest(testUsername, testEmail, testPassword, testPassword);
-        // Inject necessary values using reflection
         ReflectionTestUtils.setField(userService, "appBaseUrl", appBaseUrl);
-        // 24 hours
         String tokenDuration = "PT24H";
         ReflectionTestUtils.setField(userService, "tokenDurationString", tokenDuration);
-
-        // --- MOVED STUBS ---
-        // Stubs are now defined within specific tests that need them
-        // to avoid UnnecessaryStubbingException.
     }
 
-    // --- Helper to verify user state after registration/update ---
     private void verifyUserSavedCorrectly(AppUser savedUser, boolean expectVerified, boolean expectToken) {
         assertThat(savedUser).isNotNull();
         assertThat(savedUser.getUsername()).isEqualTo("testuser");
@@ -85,13 +77,10 @@ class UserServiceImplTest {
         }
     }
 
-    // --- Helper to setup common save behavior ---
     private void givenUserRepositorySaveWillSetId() {
         given(userRepository.save(any(AppUser.class))).willAnswer(invocation -> {
             AppUser user = invocation.getArgument(0);
-            // Simulate ID generation if not set
             if (user.getId() == null) {
-                // Use reflection to set ID since AppUser doesn't have a public setId
                 ReflectionTestUtils.setField(user, "id", 1L);
             }
             return user;
@@ -105,17 +94,14 @@ class UserServiceImplTest {
         @Test
         @DisplayName("✅ Success: Should create new user, hash password, generate token, save, and trigger email")
         void registerNewUser_Success() {
-            // Arrange specific mocks for this test
             given(userRepository.findByUsername(testUsername)).willReturn(Optional.empty());
             given(userRepository.findByEmail(testEmail)).willReturn(Optional.empty());
-            given(passwordEncoder.encode(testPassword)).willReturn(encodedPassword); // Stub needed here
-            givenUserRepositorySaveWillSetId(); // Stub needed here
-            doNothing().when(emailService).sendVerificationEmail(any(AppUser.class), anyString(), anyString()); // Stub needed here
+            given(passwordEncoder.encode(testPassword)).willReturn(encodedPassword);
+            givenUserRepositorySaveWillSetId();
+            doNothing().when(emailService).sendVerificationEmail(any(AppUser.class), anyString(), anyString());
 
-            // Act
             userService.registerNewUser(validRequest);
 
-            // Assert
             then(userRepository).should().save(userCaptor.capture());
             AppUser savedUser = userCaptor.getValue();
             verifyUserSavedCorrectly(savedUser, false, true);
@@ -139,7 +125,6 @@ class UserServiceImplTest {
                     .hasFieldOrPropertyWithValue("status", HttpStatus.BAD_REQUEST)
                     .hasMessageContaining("Passwords do not match");
 
-            // Verify no interactions with mocks happened
             then(userRepository).should(never()).findByUsername(anyString());
             then(userRepository).should(never()).findByEmail(anyString());
             then(userRepository).should(never()).save(any(AppUser.class));
@@ -150,8 +135,7 @@ class UserServiceImplTest {
         @Test
         @DisplayName("❌ Failure: Username already exists")
         void registerNewUser_UsernameExists() {
-            // Arrange specific mock for this test
-            given(userRepository.findByUsername(testUsername)).willReturn(Optional.of(new AppUser())); // User exists
+            given(userRepository.findByUsername(testUsername)).willReturn(Optional.of(new AppUser()));
 
             assertThatThrownBy(() -> userService.registerNewUser(validRequest))
                     .isInstanceOf(ResponseStatusException.class)
@@ -159,7 +143,6 @@ class UserServiceImplTest {
                     .hasMessageContaining("Username or email already exists");
 
             then(userRepository).should().findByUsername(testUsername);
-            // Verify no other interactions
             then(userRepository).should(never()).findByEmail(anyString());
             then(userRepository).should(never()).save(any(AppUser.class));
             then(emailService).should(never()).sendVerificationEmail(any(), any(), any());
@@ -171,7 +154,6 @@ class UserServiceImplTest {
         void registerNewUser_EmailExistsVerified() {
             AppUser existingVerifiedUser = new AppUser("otherUser", encodedPassword, "USER", testEmail);
             existingVerifiedUser.setVerified(true);
-            // Arrange specific mocks for this test
             given(userRepository.findByUsername(testUsername)).willReturn(Optional.empty());
             given(userRepository.findByEmail(testEmail)).willReturn(Optional.of(existingVerifiedUser));
 
@@ -182,7 +164,6 @@ class UserServiceImplTest {
 
             then(userRepository).should().findByUsername(testUsername);
             then(userRepository).should().findByEmail(testEmail);
-            // Verify no other interactions
             then(userRepository).should(never()).save(any(AppUser.class));
             then(emailService).should(never()).sendVerificationEmail(any(), any(), any());
             then(passwordEncoder).should(never()).encode(anyString());
@@ -192,14 +173,12 @@ class UserServiceImplTest {
         @DisplayName("❌ Failure: Email already exists (unverified user)")
         void registerNewUser_EmailExistsUnverified() {
             AppUser existingUnverifiedUser = new AppUser("otherUser", encodedPassword, "USER", testEmail);
-            existingUnverifiedUser.setVerified(false); // Unverified
+            existingUnverifiedUser.setVerified(false);
             existingUnverifiedUser.setVerificationTokenHash("somehash");
             existingUnverifiedUser.setVerificationTokenExpiryDate(Instant.now().plus(Duration.ofHours(1)));
-            // Arrange specific mocks for this test
             given(userRepository.findByUsername(testUsername)).willReturn(Optional.empty());
             given(userRepository.findByEmail(testEmail)).willReturn(Optional.of(existingUnverifiedUser));
 
-            // Current logic rejects registration if email exists, regardless of verification status
             assertThatThrownBy(() -> userService.registerNewUser(validRequest))
                     .isInstanceOf(ResponseStatusException.class)
                     .hasFieldOrPropertyWithValue("status", HttpStatus.CONFLICT)
@@ -207,7 +186,6 @@ class UserServiceImplTest {
 
             then(userRepository).should().findByUsername(testUsername);
             then(userRepository).should().findByEmail(testEmail);
-            // Verify no other interactions
             then(userRepository).should(never()).save(any(AppUser.class));
             then(emailService).should(never()).sendVerificationEmail(any(), any(), any());
             then(passwordEncoder).should(never()).encode(anyString());
@@ -218,12 +196,10 @@ class UserServiceImplTest {
     @DisplayName("verifyUser Tests")
     class VerifyUserTests {
         private final String rawToken = "rawValidTokenValue12345";
-        // Hashing needs to be consistent for tests
         private String hashedToken;
 
         @BeforeEach
         void hashTokenForTest() {
-            // Directly call the static helper or make it accessible for testing
             hashedToken = UserServiceImpl.hashToken(rawToken);
         }
 
@@ -236,7 +212,7 @@ class UserServiceImplTest {
             userToVerify.setVerificationTokenExpiryDate(Instant.now().plus(Duration.ofHours(1)));
 
             given(userRepository.findByVerificationTokenHash(hashedToken)).willReturn(Optional.of(userToVerify));
-            givenUserRepositorySaveWillSetId(); // Stub needed here
+            givenUserRepositorySaveWillSetId();
 
             boolean result = userService.verifyUser(rawToken);
 
@@ -251,20 +227,18 @@ class UserServiceImplTest {
         void verifyUser_AlreadyVerifiedTokenPresent() {
             AppUser alreadyVerifiedUser = new AppUser(testUsername, encodedPassword, "USER", testEmail);
             alreadyVerifiedUser.setVerified(true);
-            // Simulate token might still be there from previous verification race condition
             alreadyVerifiedUser.setVerificationTokenHash(hashedToken);
             alreadyVerifiedUser.setVerificationTokenExpiryDate(Instant.now().plus(Duration.ofHours(1)));
 
             given(userRepository.findByVerificationTokenHash(hashedToken)).willReturn(Optional.of(alreadyVerifiedUser));
-            givenUserRepositorySaveWillSetId(); // Stub needed here
+            givenUserRepositorySaveWillSetId();
 
             boolean result = userService.verifyUser(rawToken);
 
             assertThat(result).isTrue();
-            // Verify save is called to clear the token info even if already verified
             then(userRepository).should().save(userCaptor.capture());
             AppUser savedUser = userCaptor.getValue();
-            verifyUserSavedCorrectly(savedUser, true, false); // Still verified, token cleared
+            verifyUserSavedCorrectly(savedUser, true, false);
         }
 
         @Test
@@ -272,7 +246,7 @@ class UserServiceImplTest {
         void verifyUser_AlreadyVerifiedTokenCleared() {
             AppUser alreadyVerifiedUser = new AppUser(testUsername, encodedPassword, "USER", testEmail);
             alreadyVerifiedUser.setVerified(true);
-            alreadyVerifiedUser.setVerificationTokenHash(null); // Token already cleared
+            alreadyVerifiedUser.setVerificationTokenHash(null);
             alreadyVerifiedUser.setVerificationTokenExpiryDate(null);
 
             given(userRepository.findByVerificationTokenHash(hashedToken)).willReturn(Optional.of(alreadyVerifiedUser));
@@ -280,7 +254,6 @@ class UserServiceImplTest {
             boolean result = userService.verifyUser(rawToken);
 
             assertThat(result).isTrue();
-            // Verify save is NOT called because token info is already null
             then(userRepository).should(never()).save(any(AppUser.class));
         }
 
@@ -309,7 +282,6 @@ class UserServiceImplTest {
             boolean result = userService.verifyUser(rawToken);
 
             assertThat(result).isFalse();
-            // Should not save or clear token on expiry failure, allowing resend
             then(userRepository).should(never()).save(any(AppUser.class));
         }
 
@@ -345,19 +317,17 @@ class UserServiceImplTest {
             unverifiedUser.setVerificationTokenExpiryDate(Instant.now().minus(Duration.ofHours(1))); // Expired
 
             given(userRepository.findByEmail(testEmail)).willReturn(Optional.of(unverifiedUser));
-            givenUserRepositorySaveWillSetId(); // Stub needed here
+            givenUserRepositorySaveWillSetId();
             doNothing().when(emailService).sendVerificationEmail(any(AppUser.class), anyString(), anyString()); // Stub needed here
 
             userService.resendVerificationEmail(testEmail);
 
-            // Verify save was called with updated token/expiry
             then(userRepository).should().save(userCaptor.capture());
             AppUser savedUser = userCaptor.getValue();
             assertThat(savedUser.getVerificationTokenHash()).isNotEqualTo("oldHash").isNotBlank();
             assertThat(savedUser.getVerificationTokenExpiryDate()).isNotNull().isAfter(Instant.now());
-            assertThat(savedUser.isVerified()).isFalse(); // Still false
+            assertThat(savedUser.isVerified()).isFalse();
 
-            // Verify email was triggered
             then(emailService).should().sendVerificationEmail(eq(savedUser), tokenCaptor.capture(), baseUrlCaptor.capture());
             assertThat(tokenCaptor.getValue()).isNotBlank();
             assertThat(baseUrlCaptor.getValue()).isEqualTo(appBaseUrl);
@@ -371,7 +341,6 @@ class UserServiceImplTest {
             userService.resendVerificationEmail(testEmail);
 
             then(userRepository).should().findByEmail(testEmail);
-            // Verify no other interactions
             then(userRepository).should(never()).save(any(AppUser.class));
             then(emailService).should(never()).sendVerificationEmail(any(), any(), any());
         }
@@ -387,7 +356,6 @@ class UserServiceImplTest {
             userService.resendVerificationEmail(testEmail);
 
             then(userRepository).should().findByEmail(testEmail);
-            // Verify no other interactions
             then(userRepository).should(never()).save(any(AppUser.class));
             then(emailService).should(never()).sendVerificationEmail(any(), any(), any());
         }
@@ -396,8 +364,6 @@ class UserServiceImplTest {
     @Nested
     @DisplayName("Token Hashing Tests")
     class TokenHashingTests {
-
-        // These tests don't use any mocks, so they don't cause UnnecessaryStubbingException
 
         @Test
         @DisplayName("hashToken should produce consistent output for same input")
@@ -409,7 +375,7 @@ class UserServiceImplTest {
             assertThat(hash1)
                     .isNotBlank()
                     .isEqualTo(hash2)
-                    .hasSize(64); // SHA-256 hex length
+                    .hasSize(64);
         }
 
         @Test
@@ -437,7 +403,6 @@ class UserServiceImplTest {
         @Test
         @DisplayName("generateSecureToken should produce URL-safe base64 string")
         void generateSecureToken_FormatAndLength() {
-            // Access the private method via reflection for testing
             String token = ReflectionTestUtils.invokeMethod(userService, "generateSecureToken");
 
             assertThat(token)
@@ -445,7 +410,6 @@ class UserServiceImplTest {
                     .isNotBlank()
                     .doesNotContain("+", "/")
                     .matches("^[A-Za-z0-9_-]+$");
-            // Check length is reasonable (Base64 of 64 bytes without padding is usually 86-88)
             assertThat(token.length()).isGreaterThanOrEqualTo(86).isLessThanOrEqualTo(88);
         }
     }

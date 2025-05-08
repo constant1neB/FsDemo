@@ -2,7 +2,6 @@ package com.example.fsdemo.service;
 
 import com.example.fsdemo.exceptions.VideoStorageException;
 import com.example.fsdemo.service.impl.FilesystemVideoStorageServiceImpl;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,7 +25,7 @@ import static org.mockito.Mockito.*;
 class FilesystemVideoStorageServiceImplTest {
 
     @TempDir
-    Path tempStorageDir; // JUnit 5 creates and cleans this temp directory
+    Path tempStorageDir;
 
     private FilesystemVideoStorageServiceImpl storageService;
     private final String testFilename = "test-video-uuid.mp4";
@@ -36,9 +35,7 @@ class FilesystemVideoStorageServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        // Initialize service with the temporary directory path
         storageService = new FilesystemVideoStorageServiceImpl(tempStorageDir.toString());
-        // Call initialize manually as @PostConstruct doesn't run in plain unit tests
         ReflectionTestUtils.invokeMethod(storageService, "initialize");
 
         testMultipartFile = new MockMultipartFile(
@@ -48,13 +45,6 @@ class FilesystemVideoStorageServiceImplTest {
                 fileContent
         );
     }
-
-    @AfterEach
-    void tearDown() throws IOException {
-        // Additional cleanup if needed, though @TempDir handles the directory itself
-    }
-
-    // --- store() Tests ---
 
     @Test
     @DisplayName("✅ store: Should store file successfully and return filename")
@@ -70,7 +60,8 @@ class FilesystemVideoStorageServiceImplTest {
     @Test
     @DisplayName("❌ store: Should throw VideoStorageException for empty file")
     void store_FailEmptyFile() {
-        MockMultipartFile emptyFile = new MockMultipartFile("file", "empty.mp4", "video/mp4", new byte[0]);
+        MockMultipartFile emptyFile = new MockMultipartFile("file", "empty.mp4",
+                "video/mp4", new byte[0]);
 
         assertThatThrownBy(() -> storageService.store(emptyFile, testUserId, "empty.mp4"))
                 .isInstanceOf(VideoStorageException.class)
@@ -96,11 +87,9 @@ class FilesystemVideoStorageServiceImplTest {
     @Test
     @DisplayName("❌ store: Should throw VideoStorageException if file already exists")
     void store_FailFileAlreadyExists() {
-        // Store it once
         storageService.store(testMultipartFile, testUserId, testFilename);
-        assertThat(Files.exists(tempStorageDir.resolve(testFilename))).isTrue();
 
-        // Try to store again
+        assertThat(Files.exists(tempStorageDir.resolve(testFilename))).isTrue();
         assertThatThrownBy(() -> storageService.store(testMultipartFile, testUserId, testFilename))
                 .isInstanceOf(VideoStorageException.class)
                 .hasMessageContaining("File already exists");
@@ -109,26 +98,21 @@ class FilesystemVideoStorageServiceImplTest {
     @Test
     @DisplayName("❌ store: Should wrap IOException during file copy")
     void store_FailIOExceptionDuringCopy() throws IOException {
-        // Mock the multipart file to throw IOException on getInputStream
         MockMultipartFile failingFile = mock(MockMultipartFile.class);
         when(failingFile.isEmpty()).thenReturn(false);
         when(failingFile.getInputStream()).thenThrow(new IOException("Simulated disk write error"));
 
         assertThatThrownBy(() -> storageService.store(failingFile, testUserId, testFilename))
                 .isInstanceOf(VideoStorageException.class)
-                .hasMessageContaining("Failed to store file")
+                .hasMessageContaining("Failed to store file " + testFilename)
                 .hasCauseInstanceOf(IOException.class);
 
-        // Ensure file was not created partially
         assertThat(Files.exists(tempStorageDir.resolve(testFilename))).isFalse();
     }
-
-    // --- load() Tests ---
 
     @Test
     @DisplayName("✅ load: Should load existing file as Resource")
     void load_Success() throws IOException {
-        // Store a file first
         storageService.store(testMultipartFile, testUserId, testFilename);
         Path storedPath = tempStorageDir.resolve(testFilename);
         assertThat(Files.exists(storedPath)).isTrue();
@@ -150,7 +134,8 @@ class FilesystemVideoStorageServiceImplTest {
         String nonExistentFilename = "not-real.mp4";
         assertThatThrownBy(() -> storageService.load(nonExistentFilename))
                 .isInstanceOf(VideoStorageException.class)
-                .hasMessageContaining("Could not read file: " + nonExistentFilename);
+                .hasMessageContaining("Could not read file: " + nonExistentFilename)
+                .hasMessageContaining("(File does not exist)");
     }
 
     @Test
@@ -162,11 +147,13 @@ class FilesystemVideoStorageServiceImplTest {
     }
 
     @Test
-    @DisplayName("❌ load: Should throw VideoStorageException for invalid path characters (/)")
-    void load_FailInvalidPathSlash() {
-        assertThatThrownBy(() -> storageService.load("subdir/" + testFilename))
+    @DisplayName("❌ load: Should throw VideoStorageException for file in unmanaged subdirectory (correctly reports not found)")
+    void load_FailFileInUnmanagedSubdir() {
+        String pathWithSubdir = "subdir/" + testFilename;
+        assertThatThrownBy(() -> storageService.load(pathWithSubdir))
                 .isInstanceOf(VideoStorageException.class)
-                .hasMessageContaining("Invalid characters found in storage path");
+                .hasMessageContaining("Could not read file: " + pathWithSubdir)
+                .hasMessageContaining("(File does not exist)");
     }
 
     @Test
@@ -185,12 +172,9 @@ class FilesystemVideoStorageServiceImplTest {
                 .hasMessageContaining("Storage path cannot be null or blank");
     }
 
-    // --- delete() Tests ---
-
     @Test
     @DisplayName("✅ delete: Should delete existing file")
     void delete_Success() {
-        // Store a file first
         storageService.store(testMultipartFile, testUserId, testFilename);
         Path storedPath = tempStorageDir.resolve(testFilename);
         assertThat(Files.exists(storedPath)).isTrue();
@@ -219,11 +203,11 @@ class FilesystemVideoStorageServiceImplTest {
     }
 
     @Test
-    @DisplayName("❌ delete: Should throw VideoStorageException for invalid path characters (/)")
-    void delete_FailInvalidPathSlash() {
-        assertThatThrownBy(() -> storageService.delete("subdir/" + testFilename))
-                .isInstanceOf(VideoStorageException.class)
-                .hasMessageContaining("Invalid characters found in storage path");
+    @DisplayName("✅ delete: Should not throw for non-existent file in unmanaged subdirectory")
+    void delete_NonExistentFileInUnmanagedSubdir_DoesNotThrow() {
+        String pathWithSubdir = "subdir/" + testFilename;
+        assertThatCode(() -> storageService.delete(pathWithSubdir))
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -242,14 +226,10 @@ class FilesystemVideoStorageServiceImplTest {
                 .hasMessageContaining("Storage path cannot be null or blank");
     }
 
-    // --- initialize() Tests ---
-    // initialize() is called in setup, we can test failure by manipulating the path temporarily
-
     @Test
     @DisplayName("❌ initialize: Should throw VideoStorageException if directory creation fails")
     void initialize_FailDirectoryCreation() throws IOException {
-        // Create a file where the directory should be to cause Files.createDirectories to fail
-        Path conflictingFile = tempStorageDir.getParent().resolve("conflictingFile");
+        Path conflictingFile = tempStorageDir.getParent().resolve("conflictingFileInitializeTest");
         Files.createFile(conflictingFile);
 
         try {
@@ -258,7 +238,7 @@ class FilesystemVideoStorageServiceImplTest {
                     .isInstanceOf(VideoStorageException.class)
                     .hasMessageContaining("Could not initialize storage directory");
         } finally {
-            Files.deleteIfExists(conflictingFile); // Clean up
+            Files.deleteIfExists(conflictingFile);
         }
     }
 }

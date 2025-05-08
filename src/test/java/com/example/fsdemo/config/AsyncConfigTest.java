@@ -1,4 +1,3 @@
-// src/test/java/com/example/fsdemo/config/AsyncConfigTest.java
 package com.example.fsdemo.config;
 
 import org.junit.jupiter.api.DisplayName;
@@ -15,14 +14,13 @@ import java.lang.reflect.Method;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
-@ExtendWith(MockitoExtension.class) // Keep Mockito extension if needed for @InjectMocks
+@ExtendWith(MockitoExtension.class)
 @DisplayName("AsyncConfig Tests")
 class AsyncConfigTest {
 
-    @InjectMocks // Creates AsyncConfig instance
+    @InjectMocks
     private AsyncConfig asyncConfig;
 
-    // Dummy method signature needed for testing the exception handler
     public void dummyAsyncMethod(String arg1, int arg2) {
         throw new RuntimeException("Async Test Error");
     }
@@ -45,15 +43,12 @@ class AsyncConfigTest {
     @DisplayName("AsyncUncaughtExceptionHandler should run without error")
     void asyncUncaughtExceptionHandler_RunsWithoutError() throws NoSuchMethodException {
         AsyncUncaughtExceptionHandler handler = asyncConfig.getAsyncUncaughtExceptionHandler();
-        assertThat(handler).isNotNull(); // Ensure handler is retrieved
+        assertThat(handler).isNotNull();
 
         Throwable testException = new RuntimeException("Async Test Error");
-        // Get the specific dummy method with parameters
         Method testMethod = AsyncConfigTest.class.getDeclaredMethod("dummyAsyncMethod", String.class, int.class);
         Object[] testParams = {"param1", 123};
 
-        // Execute the handler to ensure it doesn't throw an exception itself.
-        // Direct log verification is complex in unit tests.
         assertThatCode(() -> {
             handler.handleUncaughtException(testException, testMethod, testParams);
         }).doesNotThrowAnyException();
