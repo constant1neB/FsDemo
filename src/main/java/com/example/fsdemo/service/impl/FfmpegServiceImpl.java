@@ -64,7 +64,7 @@ public class FfmpegServiceImpl implements FfmpegService {
 
     private void configureInput(FFmpegBuilder builder, Path tempInputPath, EditOptions options) {
         if (options.cutStartTime() != null && options.cutStartTime() >= 0) {
-            builder.setStartOffset(options.cutStartTime().longValue(), TimeUnit.SECONDS);
+            builder.setStartOffset((long) (options.cutStartTime() * 1_000_000_000L), TimeUnit.NANOSECONDS);
         }
         builder.addInput(tempInputPath.toString());
     }
@@ -79,24 +79,29 @@ public class FfmpegServiceImpl implements FfmpegService {
 
     private void configureOutputDuration(
             FFmpegOutputBuilder outputBuilder, EditOptions options, Long videoId, String logPrefix) {
-        Double cutStartTime = options.cutStartTime();
-        Double cutEndTime = options.cutEndTime();
+        Double cutStartTimeOpt = options.cutStartTime();
+        Double cutEndTimeOpt = options.cutEndTime();
 
-        if (cutEndTime != null && cutEndTime >= 0) {
-            double effectiveStartTime = (cutStartTime != null && cutStartTime >= 0) ? cutStartTime : 0.0;
-            if (cutEndTime > effectiveStartTime) {
-                double duration = cutEndTime - effectiveStartTime;
-                outputBuilder.setDuration((long) (duration * 1000), TimeUnit.MILLISECONDS);
+        if (cutEndTimeOpt != null && cutEndTimeOpt >= 0) {
+
+            double effectiveStartTimeForDurationCalc = (cutStartTimeOpt != null && cutStartTimeOpt >= 0) ? cutStartTimeOpt : 0.0;
+
+            if (cutEndTimeOpt > effectiveStartTimeForDurationCalc) {
+                double durationSeconds = cutEndTimeOpt - effectiveStartTimeForDurationCalc;
+                outputBuilder.setDuration((long) (durationSeconds * 1_000_000_000L), TimeUnit.NANOSECONDS);
+                log.debug("{} Setting output duration to {}s (effective start: {}s, specified end: {}s) for video ID: {}",
+                        logPrefix, durationSeconds, effectiveStartTimeForDurationCalc, cutEndTimeOpt, videoId);
             } else {
-                log.warn("{} Cut end time ({}) is not after cut start time ({}), ignoring end time for output duration for video ID: {}.",
-                        logPrefix, cutEndTime, effectiveStartTime, videoId);
+                log.warn("{} Specified cut end time ({}) is not validly after the effective start time ({}). " +
+                                "Output duration will not be explicitly set based on cutEndTime for video ID: {}.",
+                        logPrefix, cutEndTimeOpt, effectiveStartTimeForDurationCalc, videoId);
             }
         }
     }
 
     private void configureOutputResolution(FFmpegOutputBuilder outputBuilder, EditOptions options) {
         if (options.targetResolutionHeight() != null && options.targetResolutionHeight() > 0) {
-            outputBuilder.setVideoResolution(-2, options.targetResolutionHeight());
+            outputBuilder.setVideoFilter("scale=-2:" + options.targetResolutionHeight());
         }
     }
 
@@ -141,15 +146,21 @@ public class FfmpegServiceImpl implements FfmpegService {
             Throwable cause = e.getCause();
             log.error("{} Exception during FFmpeg execution for video ID: {}", logPrefix, videoId, cause);
 
-            String errorMessage;
-            if (cause instanceof IOException ioCause) {
-                errorMessage = "IO Error during FFmpeg execution for video ID " + videoId + ": " + ioCause.getMessage();
-            } else if (cause != null) {
-                errorMessage = "Unexpected cause during FFmpeg execution for video ID " + videoId + ": " + cause.getMessage();
-            } else {
-                errorMessage = "Unknown error during FFmpeg execution for video ID " + videoId;
-            }
+            String errorMessage = getErrorMessage(videoId, cause);
             throw new FfmpegProcessingException(errorMessage, cause);
         }
+    }
+
+    private static String getErrorMessage(Long videoId, Throwable cause) {
+        String errorMessage;
+
+        if (cause instanceof IOException && cause.getMessage() != null && cause.getMessage().contains("ffmpeg returned non-zero exit status")) {
+            errorMessage = "FFmpeg process failed for video ID " + videoId + ". Cause: " + cause.getMessage();
+        } else if (cause != null) {
+            errorMessage = "Unexpected cause during FFmpeg execution for video ID " + videoId + ": " + cause.getMessage();
+        } else {
+            errorMessage = "Unknown error during FFmpeg execution for video ID " + videoId;
+        }
+        return errorMessage;
     }
 }
