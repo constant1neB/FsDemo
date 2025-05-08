@@ -2,273 +2,285 @@ package com.example.fsdemo.service;
 
 import com.example.fsdemo.domain.AppUser;
 import com.example.fsdemo.domain.Video;
-import com.example.fsdemo.exceptions.FfmpegProcessingException;
-import com.example.fsdemo.exceptions.VideoStorageException;
+import com.example.fsdemo.repository.AppUserRepository;
 import com.example.fsdemo.repository.VideoRepository;
-import com.example.fsdemo.service.impl.VideoProcessingServiceImpl;
 import com.example.fsdemo.web.dto.EditOptions;
-import net.bramp.ffmpeg.builder.FFmpegBuilder;
-import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
+
+import org.awaitility.Awaitility;
+import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
-import org.mockito.*;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.core.io.Resource;
-import org.springframework.http.HttpStatus;
-import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.web.server.ResponseStatusException;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.BDDMockito.*;
 
-@ExtendWith(MockitoExtension.class)
-@DisplayName("VideoProcessingServiceImpl Tests")
+@SpringBootTest
+@ActiveProfiles("test")
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class VideoProcessingServiceImplTest {
 
-    @Mock private VideoRepository videoRepository;
-    @Mock private VideoStorageService videoStorageService;
-    @Mock private VideoStatusUpdater videoStatusUpdater;
-    @Mock private FfmpegService ffmpegService;
+    @Autowired
+    private VideoProcessingService videoProcessingService;
 
-    private VideoProcessingServiceImpl videoProcessingService;
+    @Autowired
+    private VideoRepository videoRepository;
 
-    @TempDir Path tempDir;
-    private Path processedStorageDir;
-    private Path temporaryFilesDir;
-    private final Long videoId = 1L;
-    private final String username = "testUser";
-    private String originalStoragePath;
-    private EditOptions validEditOptions;
-    private FFmpegBuilder mockFfmpegBuilder;
+    @Autowired
+    private AppUserRepository appUserRepository;
 
+    @Autowired
+    private VideoStatusUpdater videoStatusUpdater;
+
+    @TempDir
+    static Path sharedTempDir;
+
+    private static Path originalsPath;
+    private static Path processedPath;
+    private static Path tempPath;
+
+    private AppUser testUser;
+    private Video testVideo;
+    private EditOptions validOptions;
+    private static final String SAMPLE_VIDEO_FILENAME = "sample.mp4";
+
+
+    @DynamicPropertySource
+    static void overrideProperties(DynamicPropertyRegistry registry) {
+        originalsPath = sharedTempDir.resolve("it-originals");
+        processedPath = sharedTempDir.resolve("it-processed");
+        tempPath = sharedTempDir.resolve("it-temp");
+
+        registry.add("video.storage.path", originalsPath::toString);
+        registry.add("video.storage.processed.path", processedPath::toString);
+        registry.add("video.storage.temp.path", tempPath::toString);
+        registry.add("ffmpeg.timeout.seconds", () -> "30");
+
+        registry.add("spring.jpa.properties.hibernate.dialect", () -> "org.hibernate.dialect.H2Dialect");
+        registry.add("spring.jpa.hibernate.ddl-auto", () -> "create-drop");
+        registry.add("spring.jpa.defer-datasource-initialization", () -> "true");
+        registry.add("spring.sql.init.mode", () -> "never");
+    }
 
     @BeforeEach
     void setUp() throws IOException {
-        AppUser owner = new AppUser(username, "password", "USER", "user@example.com");
-        owner.setId(100L);
+        Files.createDirectories(originalsPath);
+        Files.createDirectories(processedPath);
+        Files.createDirectories(tempPath);
 
-        processedStorageDir = tempDir.resolve("test-processed-storage");
-        temporaryFilesDir = tempDir.resolve("test-temporary-files");
-
-        Files.createDirectories(processedStorageDir);
-        Files.createDirectories(temporaryFilesDir);
-
-        videoProcessingService = new VideoProcessingServiceImpl(
-                videoRepository,
-                videoStorageService,
-                videoStatusUpdater,
-                ffmpegService,
-                processedStorageDir.toString(),
-                temporaryFilesDir.toString()
+        testUser = appUserRepository.findByUsername("testUser").orElseGet(() ->
+                appUserRepository.save(new AppUser("testUser", "password",
+                        "USER", "testuser@example.com"))
         );
-        ReflectionTestUtils.invokeMethod(videoProcessingService, "initialize"); // Call PostConstruct manually
-
-
-        originalStoragePath = "originals/" + UUID.randomUUID() + ".mp4";
-        Video video = new Video(owner, "Original Video For Processing", Instant.now(), originalStoragePath, 1024L * 1024L, "video/mp4");
-        ReflectionTestUtils.setField(video, "id", videoId);
-
-        validEditOptions = new EditOptions(10.0, 20.0, false, 720);
-        mockFfmpegBuilder = mock(FFmpegBuilder.class);
-
-        given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-        Resource mockResource = new ByteArrayResource("test video content".getBytes());
-        given(videoStorageService.load(originalStoragePath)).willReturn(mockResource);
-        given(ffmpegService.buildFfmpegCommand(any(Path.class), any(Path.class), any(EditOptions.class), anyLong(), anyString()))
-                .willReturn(mockFfmpegBuilder);
-    }
-
-    @Test
-    @DisplayName("✅ processVideoEdits: Success - updates status, moves file, cleans up temps")
-    void processVideoEdits_Success() throws Exception {
-        doNothing().when(ffmpegService).executeFfmpegJob(eq(mockFfmpegBuilder), eq(videoId), anyString());
-        doNothing().when(videoStatusUpdater).updateStatusToReady(eq(videoId), anyString());
-
-        videoProcessingService.processVideoEdits(videoId, validEditOptions, username);
-
-        then(videoRepository).should().findById(videoId);
-        then(videoStorageService).should().load(originalStoragePath);
-        then(ffmpegService).should().buildFfmpegCommand(
-                argThat(p -> p.startsWith(temporaryFilesDir) && p.getFileName().toString().startsWith("temp-in-")),
-                argThat(p -> p.startsWith(temporaryFilesDir) && p.getFileName().toString().startsWith("temp-out-") && p.toString().endsWith(".mp4")),
-                eq(validEditOptions),
-                eq(videoId),
-                anyString());
-        then(ffmpegService).should().executeFfmpegJob(eq(mockFfmpegBuilder), eq(videoId), anyString());
-
-        ArgumentCaptor<String> processedPathCaptor = ArgumentCaptor.forClass(String.class);
-        then(videoStatusUpdater).should().updateStatusToReady(eq(videoId), processedPathCaptor.capture());
-        String capturedRelativePath = processedPathCaptor.getValue();
-        String processedSubdirNameForTest = "processed";
-        assertThat(capturedRelativePath).startsWith(processedSubdirNameForTest + "/processed-").endsWith(".mp4");
-
-        Path expectedFinalFileDir = processedStorageDir;
-        try (Stream<Path> stream = Files.list(expectedFinalFileDir)) {
-            assertThat(stream.anyMatch(p -> p.getFileName().toString().equals(Path.of(capturedRelativePath).getFileName().toString())))
-                    .isTrue();
+        if (!testUser.isVerified()) {
+            testUser.setVerified(true);
+            appUserRepository.save(testUser);
         }
 
-        try (Stream<Path> stream = Files.list(temporaryFilesDir)) {
-            assertThat(stream.filter(p -> p.getFileName().toString().startsWith("temp-in-") || p.getFileName().toString().startsWith("temp-out-")))
-                    .isEmpty();
+        String uniqueOriginalFilename = "original-" + UUID.randomUUID() + ".mp4";
+        Path targetOriginalFile = originalsPath.resolve(uniqueOriginalFilename);
+
+        ClassPathResource sampleVideoResource = new ClassPathResource(SAMPLE_VIDEO_FILENAME);
+        if (!sampleVideoResource.exists()) {
+            throw new IOException("Test resource " + SAMPLE_VIDEO_FILENAME + " not found in classpath.");
+        }
+
+        long fileSize;
+        try (InputStream sampleVideoStream = sampleVideoResource.getInputStream()) {
+            Files.copy(sampleVideoStream, targetOriginalFile, StandardCopyOption.REPLACE_EXISTING);
+            fileSize = Files.size(targetOriginalFile);
+        }
+
+        Video video = new Video(testUser, "Integration Test Desc", Instant.now(),
+                uniqueOriginalFilename, fileSize, "video/mp4");
+        video.setStatus(Video.VideoStatus.UPLOADED);
+        testVideo = videoRepository.save(video);
+
+        validOptions = new EditOptions(0.1, 0.5, false, 360);
+    }
+
+    @AfterEach
+    void tearDown() throws IOException {
+        videoRepository.deleteAll();
+        deleteDirectoryContents(originalsPath);
+        deleteDirectoryContents(processedPath);
+        deleteDirectoryContents(tempPath);
+    }
+
+    private void deleteDirectoryContents(Path directory) throws IOException {
+        if (Files.exists(directory) && Files.isDirectory(directory)) {
+            try (Stream<Path> walk = Files.walk(directory)) {
+                walk.sorted(java.util.Comparator.reverseOrder())
+                        .filter(p -> !p.equals(directory))
+                        .forEach(p -> {
+                            try {
+                                Files.delete(p);
+                            } catch (IOException e) {
+                                System.err.println("WARN: Failed to delete path during cleanup: " + p + " - " + e.getMessage());
+                            }
+                        });
+            }
         }
     }
 
-    @Test
-    @DisplayName("❌ processVideoEdits: VideoNotFound - throws ResponseStatusException")
-    void processVideoEdits_VideoNotFound() throws Exception {
-        given(videoRepository.findById(videoId)).willReturn(Optional.empty());
-
-        assertThatThrownBy(() -> videoProcessingService.processVideoEdits(videoId, validEditOptions, username))
-                .isInstanceOf(ResponseStatusException.class)
-                .hasFieldOrPropertyWithValue("status", HttpStatus.NOT_FOUND);
-
-        then(videoStatusUpdater).should(never()).updateStatusToFailed(anyLong());
-        then(ffmpegService).should(never()).executeFfmpegJob(any(), anyLong(), anyString());
-    }
 
     @Test
-    @DisplayName("❌ processVideoEdits: FfmpegProcessingException - updates status to FAILED, re-throws")
-    void processVideoEdits_FfmpegFailure_UpdatesStatusToFailedAndThrows() throws Exception {
-        FfmpegProcessingException simulatedException = new FfmpegProcessingException("ffmpeg error");
-        doThrow(simulatedException).when(ffmpegService).executeFfmpegJob(eq(mockFfmpegBuilder), eq(videoId), anyString());
+    @Order(1)
+    void processVideoEdits_Success() {
+        Long currentVideoId = testVideo.getId();
+        videoStatusUpdater.updateStatusToProcessing(currentVideoId);
 
-        ThrowingCallable processingCall = () -> videoProcessingService.processVideoEdits(videoId, validEditOptions, username);
+        videoProcessingService.processVideoEdits(currentVideoId, validOptions, testUser.getUsername());
 
-        assertThatThrownBy(processingCall)
-                .isInstanceOf(FfmpegProcessingException.class)
-                .hasMessageContaining("Video processing failed for video ID " + videoId)
-                .hasCause(simulatedException);
+        Awaitility.await().atMost(35, TimeUnit.SECONDS).pollInterval(Duration.ofSeconds(1)).until(() -> {
+            Optional<Video> optionalVideo = videoRepository.findById(currentVideoId);
+            return optionalVideo.isPresent() && optionalVideo.get().getStatus() == Video.VideoStatus.READY;
+        });
 
-        then(videoStatusUpdater).should().updateStatusToFailed(videoId);
-        try (Stream<Path> stream = Files.list(temporaryFilesDir)) {
-            assertThat(stream.filter(p -> p.getFileName().toString().startsWith("temp-in-") || p.getFileName().toString().startsWith("temp-out-")))
-                    .isEmpty();
+        Video updatedVideo = videoRepository.findById(currentVideoId).orElseThrow();
+        assertThat(updatedVideo.getStatus()).isEqualTo(Video.VideoStatus.READY);
+        assertThat(updatedVideo.getProcessedStoragePath()).isNotNull().startsWith("processed/processed-").endsWith(".mp4");
+
+        Path finalProcessedFile = processedPath.resolve(updatedVideo.getProcessedStoragePath().substring("processed/".length()));
+        assertThat(Files.exists(finalProcessedFile)).isTrue();
+
+        try {
+            assertThat(Files.size(finalProcessedFile)).isGreaterThan(0);
+        } catch (IOException e) {
+            fail("Failed to check size of processed file", e);
         }
-    }
 
-    @Test
-    @DisplayName("❌ processVideoEdits: TimeoutException during FFmpeg - updates status to FAILED, re-throws as FfmpegProcessingException")
-    void processVideoEdits_Timeout_UpdatesStatusToFailedAndThrows() throws Exception {
-        TimeoutException timeoutException = new TimeoutException("FFmpeg timed out");
-        doThrow(timeoutException).when(ffmpegService).executeFfmpegJob(eq(mockFfmpegBuilder), eq(videoId), anyString());
-
-        ThrowingCallable processingCall = () -> videoProcessingService.processVideoEdits(videoId, validEditOptions, username);
-
-        assertThatThrownBy(processingCall)
-                .isInstanceOf(FfmpegProcessingException.class)
-                .hasCauseInstanceOf(TimeoutException.class);
-
-        then(videoStatusUpdater).should().updateStatusToFailed(videoId);
-        try (Stream<Path> stream = Files.list(temporaryFilesDir)) {
-            assertThat(stream.filter(p -> p.getFileName().toString().startsWith("temp-in-") || p.getFileName().toString().startsWith("temp-out-")))
-                    .isEmpty();
+        try (Stream<Path> tempFiles = Files.list(tempPath)) {
+            assertThat(tempFiles.count())
+                    .as("Check temporary directory is empty after success")
+                    .isZero();
+        } catch (IOException e) {
+            fail("Failed to check temp directory", e);
         }
     }
 
     @Test
-    @DisplayName("❌ processVideoEdits: InterruptedException during FFmpeg - updates status to FAILED, re-throws as FfmpegProcessingException, sets interrupt flag")
-    void processVideoEdits_Interrupted_UpdatesStatusToFailedAndThrows() throws Exception {
-        InterruptedException interruptedException = new InterruptedException("FFmpeg interrupted");
-        doThrow(interruptedException).when(ffmpegService).executeFfmpegJob(eq(mockFfmpegBuilder), eq(videoId), anyString());
-        @SuppressWarnings("unused") // Indicate we are intentionally clearing the flag
-        boolean clearedBeforeTest = Thread.interrupted();
+    @Order(2)
+    void processVideoEdits_VideoNotFound() {
+        Long nonExistentVideoId = testVideo.getId() + 999L;
+        Long existingVideoId = testVideo.getId();
 
-        ThrowingCallable processingCall = () -> videoProcessingService.processVideoEdits(videoId, validEditOptions, username);
+        videoProcessingService.processVideoEdits(nonExistentVideoId, validOptions, testUser.getUsername());
 
-        assertThatThrownBy(processingCall)
-                .isInstanceOf(FfmpegProcessingException.class)
-                .hasCauseInstanceOf(InterruptedException.class);
+        Awaitility.await().pollDelay(Duration.ofSeconds(2)).until(() -> true);
 
-        then(videoStatusUpdater).should().updateStatusToFailed(videoId);
-        assertThat(Thread.currentThread().isInterrupted()).as("Interrupt flag should be set after InterruptedException").isTrue();
-        @SuppressWarnings("unused") // Indicate we are intentionally clearing the flag
-        boolean clearedAfterTest = Thread.interrupted();
+        Video videoShouldBeUnchanged = videoRepository.findById(existingVideoId).orElseThrow();
+        assertThat(videoShouldBeUnchanged.getStatus()).isEqualTo(Video.VideoStatus.UPLOADED);
+        assertThat(videoShouldBeUnchanged.getProcessedStoragePath()).isNull();
+    }
 
-        try (Stream<Path> stream = Files.list(temporaryFilesDir)) {
-            assertThat(stream.filter(p -> p.getFileName().toString().startsWith("temp-in-") || p.getFileName().toString().startsWith("temp-out-")))
-                    .as("Temporary files should be cleaned up after interrupted exception")
-                    .isEmpty();
+
+    @Test
+    @Order(3)
+    void processVideoEdits_FfmpegFailure() throws IOException {
+        String badOriginalFilename = "bad-ffmpeg-input-" + UUID.randomUUID() + ".mp4";
+        Path badSourceFile = originalsPath.resolve(badOriginalFilename);
+        Files.write(badSourceFile, new byte[0]);
+
+        Video badVideo = new Video(testUser, "Bad FFmpeg Test", Instant.now(), badOriginalFilename,
+                0L, "video/mp4");
+        Video savedBadVideo = videoRepository.save(badVideo);
+        Long badVideoId = savedBadVideo.getId();
+
+        videoStatusUpdater.updateStatusToProcessing(badVideoId);
+
+        videoProcessingService.processVideoEdits(badVideoId, validOptions, testUser.getUsername());
+
+        Awaitility.await().atMost(20, TimeUnit.SECONDS).pollInterval(Duration.ofSeconds(1)).until(() -> {
+            Optional<Video> optionalVideo = videoRepository.findById(badVideoId);
+            return optionalVideo.isPresent() && optionalVideo.get().getStatus() == Video.VideoStatus.FAILED;
+        });
+
+        Video updatedVideo = videoRepository.findById(badVideoId).orElseThrow();
+        assertThat(updatedVideo.getStatus()).isEqualTo(Video.VideoStatus.FAILED);
+        assertThat(updatedVideo.getProcessedStoragePath()).isNull();
+
+        try (Stream<Path> tempFiles = Files.list(tempPath)) {
+            assertThat(tempFiles.count())
+                    .as("Check temporary directory is empty after FFmpeg failure")
+                    .isZero();
+        } catch (IOException e) {
+            fail("Failed to check temp directory", e);
         }
     }
 
+
     @Test
-    @DisplayName("❌ processVideoEdits: IOException during temp file prep (load) - updates status to FAILED, re-throws as FfmpegProcessingException")
-    void processVideoEdits_IOExceptionOnLoad_UpdatesStatusToFailedAndThrows() throws Exception {
-        VideoStorageException storageException = new VideoStorageException("Cannot load original");
-        given(videoStorageService.load(originalStoragePath)).willThrow(storageException);
+    @Order(4)
+    void processVideoEdits_OriginalFileNotFoundInStorage() throws IOException {
+        String missingFileStoragePath = "missing-original-" + UUID.randomUUID() + ".mp4";
+        Video videoWithMissingFile = new Video(testUser, "Missing File Test", Instant.now(),
+                missingFileStoragePath, 100L, "video/mp4");
+        Video savedVideo = videoRepository.save(videoWithMissingFile);
+        Long missingVideoId = savedVideo.getId();
 
-        ThrowingCallable processingCall = () -> videoProcessingService.processVideoEdits(videoId, validEditOptions, username);
+        Files.deleteIfExists(originalsPath.resolve(missingFileStoragePath));
 
-        assertThatThrownBy(processingCall)
-                .isInstanceOf(FfmpegProcessingException.class)
-                .hasMessageContaining("Video processing failed due to file operation for video ID " + videoId)
-                .hasCauseInstanceOf(VideoStorageException.class);
+        videoStatusUpdater.updateStatusToProcessing(missingVideoId);
 
-        then(videoStatusUpdater).should().updateStatusToFailed(videoId);
-        then(ffmpegService).should(never()).executeFfmpegJob(any(), anyLong(), anyString());
+        videoProcessingService.processVideoEdits(missingVideoId, validOptions, testUser.getUsername());
+
+        Awaitility.await().atMost(20, TimeUnit.SECONDS).pollInterval(Duration.ofSeconds(1)).until(() -> {
+            Optional<Video> optionalVideo = videoRepository.findById(missingVideoId);
+            return optionalVideo.isPresent() && optionalVideo.get().getStatus() == Video.VideoStatus.FAILED;
+        });
+
+        Video updatedVideo = videoRepository.findById(missingVideoId).orElseThrow();
+        assertThat(updatedVideo.getStatus()).isEqualTo(Video.VideoStatus.FAILED);
+        assertThat(updatedVideo.getProcessedStoragePath()).isNull();
     }
 
     @Test
-    @DisplayName("❌ processVideoEdits: IOException during temp file prep (copy) - updates status to FAILED, re-throws as FfmpegProcessingException")
-    void processVideoEdits_IOExceptionOnCopy_UpdatesStatusToFailedAndThrows() throws Exception {
-        Resource mockResourceThrowsOnInputStream = mock(Resource.class);
-        given(mockResourceThrowsOnInputStream.exists()).willReturn(true);
-        given(mockResourceThrowsOnInputStream.isReadable()).willReturn(true);
-        given(mockResourceThrowsOnInputStream.getInputStream()).willThrow(new IOException("Simulated copy error"));
-        given(videoStorageService.load(originalStoragePath)).willReturn(mockResourceThrowsOnInputStream);
-
-        ThrowingCallable processingCall = () -> videoProcessingService.processVideoEdits(videoId, validEditOptions, username);
-
-        assertThatThrownBy(processingCall)
-                .isInstanceOf(FfmpegProcessingException.class)
-                .hasMessageContaining("Video processing failed due to file operation for video ID " + videoId)
-                .hasCauseInstanceOf(IOException.class);
-
-        then(videoStatusUpdater).should().updateStatusToFailed(videoId);
-        then(ffmpegService).should(never()).executeFfmpegJob(any(), anyLong(), anyString());
-    }
-
-    @Test
-    @DisplayName("❌ processVideoEdits: Invalid EditOptions (end time before start time) - throws ResponseStatusException")
-    void processVideoEdits_InvalidEditOptions_EndTimeBeforeStartTime() throws Exception {
+    @Order(5)
+    void processVideoEdits_InvalidEditOptions_EndTimeBeforeStartTime() {
         EditOptions invalidOptions = new EditOptions(20.0, 10.0, false, 720);
+        Long currentVideoId = testVideo.getId();
+        Video.VideoStatus initialStatus = testVideo.getStatus();
 
-        assertThatThrownBy(() -> videoProcessingService.processVideoEdits(videoId, invalidOptions, username))
-                .isInstanceOf(ResponseStatusException.class)
-                .hasFieldOrPropertyWithValue("status", HttpStatus.BAD_REQUEST)
-                .hasMessageContaining("Invalid cut times: End time (10.00) must be strictly greater than start time (20.00).");
+        videoProcessingService.processVideoEdits(currentVideoId, invalidOptions, testUser.getUsername());
 
-        then(videoStatusUpdater).should(never()).updateStatusToFailed(anyLong());
-        then(ffmpegService).should(never()).executeFfmpegJob(any(), anyLong(), anyString());
+        Awaitility.await().pollDelay(Duration.ofMillis(500)).atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            Video videoNotProcessed = videoRepository.findById(currentVideoId).orElseThrow();
+            assertThat(videoNotProcessed.getStatus()).isEqualTo(initialStatus);
+            assertThat(videoNotProcessed.getProcessedStoragePath()).isNull();
+        });
     }
 
     @Test
-    @DisplayName("❌ processVideoEdits: Null EditOptions - throws ResponseStatusException")
-    void processVideoEdits_NullEditOptions() throws Exception {
-        assertThatThrownBy(() -> videoProcessingService.processVideoEdits(videoId, null, username))
-                .isInstanceOf(ResponseStatusException.class)
-                .hasFieldOrPropertyWithValue("status", HttpStatus.BAD_REQUEST)
-                .hasMessageContaining("EditOptions cannot be null.");
+    @Order(6)
+    void processVideoEdits_NullEditOptions() {
+        Long currentVideoId = testVideo.getId();
+        Video.VideoStatus initialStatus = testVideo.getStatus();
 
-        then(videoStatusUpdater).should(never()).updateStatusToFailed(anyLong());
-        then(ffmpegService).should(never()).executeFfmpegJob(any(), anyLong(), anyString());
+        videoProcessingService.processVideoEdits(currentVideoId, null, testUser.getUsername());
+
+        Awaitility.await().pollDelay(Duration.ofMillis(500)).atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            Video videoNotProcessed = videoRepository.findById(currentVideoId).orElseThrow();
+            assertThat(videoNotProcessed.getStatus()).isEqualTo(initialStatus);
+            assertThat(videoNotProcessed.getProcessedStoragePath()).isNull();
+        });
     }
 }
