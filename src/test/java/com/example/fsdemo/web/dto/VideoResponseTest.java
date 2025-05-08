@@ -2,58 +2,68 @@ package com.example.fsdemo.web.dto;
 
 import com.example.fsdemo.domain.AppUser;
 import com.example.fsdemo.domain.Video;
+import com.example.fsdemo.domain.Video.VideoStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
-import static org.assertj.core.api.Assertions.*;
+import java.time.Instant;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("VideoResponse DTO Tests")
 class VideoResponseTest {
 
-    private AppUser owner;
     private Video video;
+    private final String publicVideoId = "test-public-id-123";
 
     @BeforeEach
     void setUp() {
-        owner = new AppUser("testowner", "pass", "USER", "owner@test.com");
+        AppUser owner = new AppUser("testOwner", "password", "USER", "owner@example.com");
         owner.setId(1L);
 
-        video = new Video(owner, "gen-name.mp4", "Test Desc",
-                java.time.Instant.now(), "storage/path", 1024L, "video/mp4");
-        video.setId(99L);
+        video = new Video(owner, "Test Desc", Instant.now(), "path/gen-name.mp4", 12345L, "video/mp4");
+        ReflectionTestUtils.setField(video, "id", 2L);
+        ReflectionTestUtils.setField(video, "publicId", publicVideoId);
+        video.setStatus(VideoStatus.READY);
+        video.setDuration(120.5);
     }
 
     @Test
-    @DisplayName("fromEntity should create correct DTO from valid Video")
-    void fromEntity_Success() {
+    @DisplayName("✅ fromEntity should correctly map Video entity to VideoResponse DTO")
+    void fromEntity_MapsCorrectly() {
         VideoResponse dto = VideoResponse.fromEntity(video);
 
         assertThat(dto).isNotNull();
-        assertThat(dto.id()).isEqualTo(video.getId());
+        assertThat(dto.publicId()).isEqualTo(publicVideoId);
         assertThat(dto.description()).isEqualTo(video.getDescription());
-        assertThat(dto.ownerUsername()).isEqualTo(owner.getUsername());
         assertThat(dto.fileSize()).isEqualTo(video.getFileSize());
+        assertThat(dto.status()).isEqualTo(video.getStatus());
+        assertThat(dto.uploadDate()).isEqualTo(video.getUploadDate());
+        assertThat(dto.duration()).isEqualTo(video.getDuration());
     }
 
     @Test
-    @DisplayName("fromEntity should throw NullPointerException if Video is null")
-    void fromEntity_FailNullVideo() {
-        assertThatNullPointerException()
-                .isThrownBy(() -> VideoResponse.fromEntity(null))
-                .withMessageContaining("Cannot create VideoResponse from null Video entity");
+    @DisplayName("❌ fromEntity should throw NullPointerException if Video entity is null")
+    void fromEntity_NullVideo_ThrowsNullPointerException() {
+        assertThatThrownBy(() -> VideoResponse.fromEntity(null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("Cannot create VideoResponse from null Video entity");
     }
 
     @Test
-    @DisplayName("fromEntity should throw NullPointerException if Video owner is null")
-    void fromEntity_FailNullOwner() {
-        // Create a video without setting the owner (or explicitly set to null)
-        Video videoWithNullOwner = new Video(); // Use default constructor
-        videoWithNullOwner.setId(100L);
-        // owner field is null
+    @DisplayName("✅ fromEntity should handle null description and duration from Video entity")
+    void fromEntity_HandlesNullFields() {
+        video.setDescription(null);
+        video.setDuration(null);
 
-        assertThatNullPointerException()
-                .isThrownBy(() -> VideoResponse.fromEntity(videoWithNullOwner))
-                .withMessageContaining("Cannot create VideoResponse from Video entity with null owner");
+        VideoResponse dto = VideoResponse.fromEntity(video);
+
+        assertThat(dto.description()).isNull();
+        assertThat(dto.duration()).isNull();
+        assertThat(dto.publicId()).isEqualTo(publicVideoId);
+        assertThat(dto.fileSize()).isEqualTo(video.getFileSize());
     }
 }

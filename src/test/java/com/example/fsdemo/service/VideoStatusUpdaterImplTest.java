@@ -3,309 +3,240 @@ package com.example.fsdemo.service;
 import com.example.fsdemo.domain.AppUser;
 import com.example.fsdemo.domain.Video;
 import com.example.fsdemo.domain.Video.VideoStatus;
+import com.example.fsdemo.events.VideoStatusChangedEvent;
+import com.example.fsdemo.exceptions.VideoStorageException;
 import com.example.fsdemo.repository.VideoRepository;
 import com.example.fsdemo.service.impl.VideoStatusUpdaterImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
-import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.OptimisticLockingFailureException; // Example DB exception
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.*;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("VideoStatusUpdater Implementation Tests")
+@DisplayName("VideoStatusUpdaterImpl Tests")
 class VideoStatusUpdaterImplTest {
 
     @Mock
     private VideoRepository videoRepository;
+    @Mock
+    private VideoStorageService videoStorageService;
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
-    private VideoStatusUpdaterImpl videoStatusUpdater;
+    private VideoStatusUpdaterImpl statusUpdater;
 
-    @Captor
-    private ArgumentCaptor<Video> videoCaptor;
-
-    private AppUser testUser;
+    private Video testVideo;
     private final Long videoId = 1L;
-    private final String processedPath = "processed/video.mp4";
+    private final String publicVideoId = "public-uuid-123";
+    private final String username = "testUser";
+    private final String processedPath = "processed/proc.mp4";
 
     @BeforeEach
     void setUp() {
-        testUser = new AppUser("test", "pass", "USER", "test@test.com");
-        testUser.setId(1L); // Set ID for consistency
+        AppUser testUser = new AppUser(username, "pass", "USER", "user@example.com");
+        testUser.setId(10L);
+
+        String originalPath = "originals/orig.mp4";
+        testVideo = new Video(testUser, "Test Video Description", Instant.now(), originalPath, 100L, "video/mp4");
+        ReflectionTestUtils.setField(testVideo, "id", videoId);
+        ReflectionTestUtils.setField(testVideo, "publicId", publicVideoId);
     }
 
-    private Video createVideoWithStatus(VideoStatus status) {
-        Video video = new Video(testUser, "uuid.mp4", "Desc", Instant.now(), "orig.mp4", 100L, "video/mp4");
-        video.setId(videoId);
-        video.setStatus(status);
-        // Set processed path if appropriate for the initial state
-        if (status == VideoStatus.READY) {
-            video.setProcessedStoragePath("old_processed.mp4");
+    @ParameterizedTest
+    @EnumSource(value = VideoStatus.class, names = {"UPLOADED", "READY", "FAILED"})
+    @DisplayName("✅ updateStatusToProcessing: Success from valid states")
+    void updateStatusToProcessing_SuccessFromValidStates(VideoStatus initialState) {
+        testVideo.setStatus(initialState);
+        if (initialState == VideoStatus.READY) {
+            testVideo.setProcessedStoragePath(processedPath);
         }
-        return video;
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(testVideo));
+        given(videoRepository.save(any(Video.class))).willAnswer(inv -> inv.getArgument(0));
+
+        statusUpdater.updateStatusToProcessing(videoId);
+
+        then(videoRepository).should().save(testVideo);
+        assertThat(testVideo.getStatus()).isEqualTo(VideoStatus.PROCESSING);
+        assertThat(testVideo.getProcessedStoragePath()).isNull(); // Should be cleared
+
+        if (initialState == VideoStatus.READY) {
+            then(videoStorageService).should().delete(processedPath); // Verify cleanup
+        } else {
+            then(videoStorageService).should(never()).delete(anyString());
+        }
+        verifyEventPublished(VideoStatus.PROCESSING, null);
     }
 
-    @Nested
-    @DisplayName("updateStatusToProcessing Tests")
-    class UpdateToProcessingTests {
+    @Test
+    @DisplayName("✅ updateStatusToProcessing: Idempotent if already PROCESSING")
+    void updateStatusToProcessing_AlreadyProcessing() {
+        testVideo.setStatus(VideoStatus.PROCESSING);
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(testVideo));
 
-        @Test
-        @DisplayName("✅ Success: Should update from UPLOADED to PROCESSING and clear processed path")
-        void updateToProcessing_FromUploaded_Success() {
-            Video video = createVideoWithStatus(VideoStatus.UPLOADED);
-            video.setProcessedStoragePath("should_be_cleared.mp4"); // Add path to check clearing
-            given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoRepository.save(any(Video.class))).willReturn(video); // Return saved video
+        statusUpdater.updateStatusToProcessing(videoId);
 
-            videoStatusUpdater.updateStatusToProcessing(videoId);
-
-            then(videoRepository).should().save(videoCaptor.capture());
-            Video savedVideo = videoCaptor.getValue();
-            assertThat(savedVideo.getStatus()).isEqualTo(VideoStatus.PROCESSING);
-            assertThat(savedVideo.getProcessedStoragePath()).isNull(); // Verify path cleared
-        }
-
-        @Test
-        @DisplayName("✅ Success: Should update from READY to PROCESSING and clear processed path")
-        void updateToProcessing_FromReady_Success() {
-            Video video = createVideoWithStatus(VideoStatus.READY); // Already has processed path
-            given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoRepository.save(any(Video.class))).willReturn(video);
-
-            videoStatusUpdater.updateStatusToProcessing(videoId);
-
-            then(videoRepository).should().save(videoCaptor.capture());
-            Video savedVideo = videoCaptor.getValue();
-            assertThat(savedVideo.getStatus()).isEqualTo(VideoStatus.PROCESSING);
-            assertThat(savedVideo.getProcessedStoragePath()).isNull(); // Verify path cleared
-        }
-
-        @Test
-        @DisplayName("❌ Failure: Should throw IllegalStateException if already PROCESSING")
-        void updateToProcessing_FromProcessing_ThrowsException() {
-            Video video = createVideoWithStatus(VideoStatus.PROCESSING);
-            given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-
-            assertThatThrownBy(() -> videoStatusUpdater.updateStatusToProcessing(videoId))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("current state: PROCESSING");
-
-            then(videoRepository).should(never()).save(any(Video.class));
-        }
-
-
-        @Test
-        @DisplayName("❌ Failure: Should throw IllegalStateException if status is FAILED")
-        void updateToProcessing_FromFailed_ThrowsException() {
-            Video video = createVideoWithStatus(VideoStatus.FAILED);
-            given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-
-            assertThatThrownBy(() -> videoStatusUpdater.updateStatusToProcessing(videoId))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("current state: FAILED");
-
-            then(videoRepository).should(never()).save(any(Video.class));
-        }
-
-        @Test
-        @DisplayName("❌ Failure: Should throw IllegalStateException if video not found")
-        void updateToProcessing_VideoNotFound_ThrowsException() {
-            given(videoRepository.findById(videoId)).willReturn(Optional.empty());
-
-            assertThatThrownBy(() -> videoStatusUpdater.updateStatusToProcessing(videoId))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("Video not found: " + videoId);
-
-            then(videoRepository).should(never()).save(any(Video.class));
-        }
-
-        @Test
-        @DisplayName("❌ Failure: Should throw IllegalStateException on DB save error")
-        void updateToProcessing_DbError_ThrowsException() {
-            Video video = createVideoWithStatus(VideoStatus.UPLOADED);
-            given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoRepository.save(any(Video.class))).willThrow(new OptimisticLockingFailureException("DB Error"));
-
-            assertThatThrownBy(() -> videoStatusUpdater.updateStatusToProcessing(videoId))
-                    .isInstanceOf(IllegalStateException.class) // Service wraps DB exceptions
-                    .hasMessageContaining("Failed to update video status to PROCESSING")
-                    .hasCauseInstanceOf(OptimisticLockingFailureException.class);
-        }
+        then(videoRepository).should(never()).save(any(Video.class));
+        then(videoStorageService).should(never()).delete(anyString());
+        assertThat(testVideo.getStatus()).isEqualTo(VideoStatus.PROCESSING);
+        verifyEventPublished(VideoStatus.PROCESSING, null);
     }
 
-    @Nested
-    @DisplayName("updateStatusToReady Tests")
-    class UpdateToReadyTests {
+    @Test
+    @DisplayName("❌ updateStatusToProcessing: Fails if video not found")
+    void updateStatusToProcessing_VideoNotFound() {
+        given(videoRepository.findById(videoId)).willReturn(Optional.empty());
 
-        @Test
-        @DisplayName("✅ Success: Should update from PROCESSING to READY and set processed path")
-        void updateToReady_Success() {
-            Video video = createVideoWithStatus(VideoStatus.PROCESSING);
-            given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoRepository.save(any(Video.class))).willReturn(video);
-
-            videoStatusUpdater.updateStatusToReady(videoId, processedPath);
-
-            then(videoRepository).should().save(videoCaptor.capture());
-            Video savedVideo = videoCaptor.getValue();
-            assertThat(savedVideo.getStatus()).isEqualTo(VideoStatus.READY);
-            assertThat(savedVideo.getProcessedStoragePath()).isEqualTo(processedPath);
-        }
-
-        @Test
-        @DisplayName("❌ Failure: Should throw IllegalStateException if not in PROCESSING state")
-        void updateToReady_FromNonProcessing_ThrowsException() {
-            Video video = createVideoWithStatus(VideoStatus.UPLOADED); // Not PROCESSING
-            given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-
-            assertThatThrownBy(() -> videoStatusUpdater.updateStatusToReady(videoId, processedPath))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("Video is not in PROCESSING state");
-
-            then(videoRepository).should(never()).save(any(Video.class));
-        }
-
-        @Test
-        @DisplayName("❌ Failure: Should throw IllegalArgumentException if processed path is null")
-        void updateToReady_NullPath_ThrowsException() {
-            assertThatThrownBy(() -> videoStatusUpdater.updateStatusToReady(videoId, null))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("Processed storage path is required");
-
-            then(videoRepository).should(never()).findById(anyLong());
-            then(videoRepository).should(never()).save(any(Video.class));
-        }
-
-        @Test
-        @DisplayName("❌ Failure: Should throw IllegalArgumentException if processed path is blank")
-        void updateToReady_BlankPath_ThrowsException() {
-            assertThatThrownBy(() -> videoStatusUpdater.updateStatusToReady(videoId, "  "))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("Processed storage path is required");
-
-            then(videoRepository).should(never()).findById(anyLong());
-            then(videoRepository).should(never()).save(any(Video.class));
-        }
-
-        @Test
-        @DisplayName("❌ Failure: Should throw IllegalStateException if video not found")
-        void updateToReady_VideoNotFound_ThrowsException() {
-            given(videoRepository.findById(videoId)).willReturn(Optional.empty());
-
-            assertThatThrownBy(() -> videoStatusUpdater.updateStatusToReady(videoId, processedPath))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("Video not found: " + videoId);
-
-            then(videoRepository).should(never()).save(any(Video.class));
-        }
-
-        @Test
-        @DisplayName("❌ Failure: Should throw IllegalStateException on DB save error")
-        void updateToReady_DbError_ThrowsException() {
-            Video video = createVideoWithStatus(VideoStatus.PROCESSING);
-            given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoRepository.save(any(Video.class))).willThrow(new OptimisticLockingFailureException("DB Error"));
-
-            assertThatThrownBy(() -> videoStatusUpdater.updateStatusToReady(videoId, processedPath))
-                    .isInstanceOf(IllegalStateException.class) // Service wraps DB exceptions
-                    .hasMessageContaining("Failed to update video status to READY")
-                    .hasCauseInstanceOf(OptimisticLockingFailureException.class);
-        }
+        assertThatThrownBy(() -> statusUpdater.updateStatusToProcessing(videoId))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Video not found: " + videoId);
+        then(eventPublisher).shouldHaveNoInteractions();
     }
 
-    @Nested
-    @DisplayName("updateStatusToFailed Tests")
-    class UpdateToFailedTests {
+    @Test
+    @DisplayName("⚠️ updateStatusToProcessing: Handles VideoStorageException during cleanup gracefully")
+    void updateStatusToProcessing_StorageExceptionDuringCleanup() {
+        testVideo.setStatus(VideoStatus.READY);
+        testVideo.setProcessedStoragePath(processedPath);
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(testVideo));
+        given(videoRepository.save(any(Video.class))).willAnswer(inv -> inv.getArgument(0));
+        doThrow(new VideoStorageException("Cleanup failed")).when(videoStorageService).delete(processedPath);
 
-        @Test
-        @DisplayName("✅ Success: Should update from PROCESSING to FAILED and clear processed path")
-        void updateToFailed_FromProcessing_Success() {
-            Video video = createVideoWithStatus(VideoStatus.PROCESSING);
-            video.setProcessedStoragePath("should_be_cleared.mp4");
-            given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoRepository.save(any(Video.class))).willReturn(video);
+        statusUpdater.updateStatusToProcessing(videoId);
 
-            videoStatusUpdater.updateStatusToFailed(videoId);
+        then(videoRepository).should().save(testVideo);
+        assertThat(testVideo.getStatus()).isEqualTo(VideoStatus.PROCESSING);
+        assertThat(testVideo.getProcessedStoragePath()).isNull();
+        verifyEventPublished(VideoStatus.PROCESSING, null);
+    }
 
-            then(videoRepository).should().save(videoCaptor.capture());
-            Video savedVideo = videoCaptor.getValue();
-            assertThat(savedVideo.getStatus()).isEqualTo(VideoStatus.FAILED);
-            assertThat(savedVideo.getProcessedStoragePath()).isNull();
-        }
+    @Test
+    @DisplayName("✅ updateStatusToReady: Success")
+    void updateStatusToReady_Success() {
+        testVideo.setStatus(VideoStatus.PROCESSING);
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(testVideo));
+        given(videoRepository.save(any(Video.class))).willAnswer(inv -> inv.getArgument(0));
 
-        @Test
-        @DisplayName("✅ No-Op: Should not change status if already FAILED")
-        void updateToFailed_FromFailed_NoOp() {
-            Video video = createVideoWithStatus(VideoStatus.FAILED);
-            given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
+        statusUpdater.updateStatusToReady(videoId, processedPath);
 
-            videoStatusUpdater.updateStatusToFailed(videoId);
+        then(videoRepository).should().save(testVideo);
+        assertThat(testVideo.getStatus()).isEqualTo(VideoStatus.READY);
+        assertThat(testVideo.getProcessedStoragePath()).isEqualTo(processedPath);
+        verifyEventPublished(VideoStatus.READY, null);
+    }
 
-            then(videoRepository).should(never()).save(any(Video.class));
-        }
+    @Test
+    @DisplayName("❌ updateStatusToReady: Fails if video not found")
+    void updateStatusToReady_VideoNotFound() {
+        given(videoRepository.findById(videoId)).willReturn(Optional.empty());
+        assertThatThrownBy(() -> statusUpdater.updateStatusToReady(videoId, processedPath))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Video not found: " + videoId);
+        then(eventPublisher).shouldHaveNoInteractions();
+    }
 
-        @Test
-        @DisplayName("✅ No-Op: Should not change status if UPLOADED")
-        void updateToFailed_FromUploaded_NoOp() {
-            Video video = createVideoWithStatus(VideoStatus.UPLOADED);
-            given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
+    @Test
+    @DisplayName("❌ updateStatusToReady: Fails if processedPath is null or blank")
+    void updateStatusToReady_NullOrBlankPath() {
+        assertThatThrownBy(() -> statusUpdater.updateStatusToReady(videoId, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Processed storage path is required");
 
-            videoStatusUpdater.updateStatusToFailed(videoId);
+        assertThatThrownBy(() -> statusUpdater.updateStatusToReady(videoId, "  "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Processed storage path is required");
+        then(eventPublisher).shouldHaveNoInteractions();
+    }
 
-            then(videoRepository).should(never()).save(any(Video.class));
-        }
+    @ParameterizedTest
+    @EnumSource(value = VideoStatus.class, names = {"UPLOADED", "READY", "FAILED"})
+    @DisplayName("⚠️ updateStatusToReady: Warns if not in PROCESSING state but still updates")
+    void updateStatusToReady_WarnsIfNotProcessingButUpdates(VideoStatus initialState) {
+        testVideo.setStatus(initialState);
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(testVideo));
+        given(videoRepository.save(any(Video.class))).willAnswer(inv -> inv.getArgument(0));
 
-        @Test
-        @DisplayName("✅ No-Op: Should not change status if READY")
-        void updateToFailed_FromReady_NoOp() {
-            Video video = createVideoWithStatus(VideoStatus.READY);
-            given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
+        statusUpdater.updateStatusToReady(videoId, processedPath);
 
-            videoStatusUpdater.updateStatusToFailed(videoId);
+        then(videoRepository).should().save(testVideo);
+        assertThat(testVideo.getStatus()).isEqualTo(VideoStatus.READY);
+        assertThat(testVideo.getProcessedStoragePath()).isEqualTo(processedPath);
+        verifyEventPublished(VideoStatus.READY, null);
+    }
 
-            then(videoRepository).should(never()).save(any(Video.class));
-        }
+    @Test
+    @DisplayName("✅ updateStatusToFailed: Success if status was PROCESSING")
+    void updateStatusToFailed_SuccessFromProcessing() {
+        testVideo.setStatus(VideoStatus.PROCESSING);
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(testVideo));
+        given(videoRepository.save(any(Video.class))).willAnswer(inv -> inv.getArgument(0));
 
+        statusUpdater.updateStatusToFailed(videoId);
 
-        @Test
-        @DisplayName("✅ Log: Should log error but not throw if video not found")
-        void updateToFailed_VideoNotFound_LogsError() {
-            given(videoRepository.findById(videoId)).willReturn(Optional.empty());
+        then(videoRepository).should().save(testVideo);
+        assertThat(testVideo.getStatus()).isEqualTo(VideoStatus.FAILED);
+        assertThat(testVideo.getProcessedStoragePath()).isNull();
+        verifyEventPublished(VideoStatus.FAILED, "Video processing failed.");
+    }
 
-            // Should not throw, just log (verification via logging framework or spy needed for full check)
-            assertThatCode(() -> videoStatusUpdater.updateStatusToFailed(videoId))
-                    .doesNotThrowAnyException();
+    @ParameterizedTest
+    @EnumSource(value = VideoStatus.class, names = {"UPLOADED", "READY", "FAILED"})
+    @DisplayName("⚠️ updateStatusToFailed: No-op if status was not PROCESSING")
+    void updateStatusToFailed_NoOpIfNotProcessing(VideoStatus initialState) {
+        testVideo.setStatus(initialState);
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(testVideo));
 
-            then(videoRepository).should(never()).save(any(Video.class));
-        }
+        statusUpdater.updateStatusToFailed(videoId);
 
-        @Test
-        @DisplayName("✅ Log: Should log error but not throw on DB save error")
-        void updateToFailed_DbError_LogsError() {
-            Video video = createVideoWithStatus(VideoStatus.PROCESSING);
-            given(videoRepository.findById(videoId)).willReturn(Optional.of(video));
-            given(videoRepository.save(any(Video.class))).willThrow(new OptimisticLockingFailureException("DB Error"));
+        then(videoRepository).should(never()).save(any(Video.class));
+        assertThat(testVideo.getStatus()).isEqualTo(initialState);
+        then(eventPublisher).shouldHaveNoInteractions();
+    }
 
-            // Should not throw, just log (verification via logging framework or spy needed for full check)
-            assertThatCode(() -> videoStatusUpdater.updateStatusToFailed(videoId))
-                    .doesNotThrowAnyException();
+    @Test
+    @DisplayName("⚠️ updateStatusToFailed: No-op if video not found, logs error")
+    void updateStatusToFailed_VideoNotFound() {
+        given(videoRepository.findById(videoId)).willReturn(Optional.empty());
+        statusUpdater.updateStatusToFailed(videoId);
+        then(videoRepository).should(never()).save(any(Video.class));
+        then(eventPublisher).shouldHaveNoInteractions();
+    }
 
-            // Verify save was attempted
-            then(videoRepository).should().save(any(Video.class));
-        }
+    @Test
+    @DisplayName("⚠️ updateStatusToFailed: Handles DB save exception gracefully, logs error")
+    void updateStatusToFailed_DbSaveException() {
+        testVideo.setStatus(VideoStatus.PROCESSING);
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(testVideo));
+        doThrow(new RuntimeException("DB save failed")).when(videoRepository).save(any(Video.class));
+
+        assertThatCode(() -> statusUpdater.updateStatusToFailed(videoId))
+                .doesNotThrowAnyException();
+
+        then(eventPublisher).shouldHaveNoInteractions();
+    }
+
+    private void verifyEventPublished(VideoStatus expectedStatus, String expectedMessage) {
+        ArgumentCaptor<VideoStatusChangedEvent> eventCaptor = ArgumentCaptor.forClass(VideoStatusChangedEvent.class);
+        then(eventPublisher).should().publishEvent(eventCaptor.capture());
+        VideoStatusChangedEvent publishedEvent = eventCaptor.getValue();
+        assertThat(publishedEvent.getPublicId()).isEqualTo(publicVideoId);
+        assertThat(publishedEvent.getUsername()).isEqualTo(username);
+        assertThat(publishedEvent.getNewStatus()).isEqualTo(expectedStatus);
+        assertThat(publishedEvent.getMessage()).isEqualTo(expectedMessage);
     }
 }

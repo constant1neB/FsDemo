@@ -5,21 +5,24 @@ import com.example.fsdemo.domain.Video;
 import com.example.fsdemo.repository.VideoRepository;
 import com.example.fsdemo.service.impl.VideoSecurityServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.verify;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 
 @ExtendWith(MockitoExtension.class)
-class VideoSecurityServiceTest {
+@DisplayName("VideoSecurityService Implementation Tests")
+class VideoSecurityServiceImplTest {
 
     @Mock
     private VideoRepository videoRepository;
@@ -27,97 +30,91 @@ class VideoSecurityServiceTest {
     @InjectMocks
     private VideoSecurityServiceImpl videoSecurityService;
 
-    private AppUser ownerUser;
-    private AppUser otherUser;
     private Video userVideo;
     private final Long videoId = 1L;
-    private final Long nonExistentVideoId = 99L;
+    private final String ownerUsername = "ownerUser";
+    private final String otherUsername = "otherUser";
 
     @BeforeEach
     void setUp() {
-        ownerUser = new AppUser("owner", "pass", "USER", "owner@example.com");
+        AppUser ownerUser = new AppUser(ownerUsername, "pass", "USER", "owner@example.com");
         ownerUser.setId(10L);
-
-        otherUser = new AppUser("other", "pass", "USER", "other@example.com");
-        otherUser.setId(20L);
-
-
-        userVideo = new Video(ownerUser, "user-video.mp4", "desc", Instant.now(), "path/user-video.mp4", 100L, "video/mp4");
-        userVideo.setId(videoId);
+        userVideo = new Video(ownerUser, "Video Description", Instant.now(), "path/user-video.mp4", 100L, "video/mp4");
+        ReflectionTestUtils.setField(userVideo, "id", videoId);
     }
 
-    // --- isOwner Tests ---
-
     @Test
-    void isOwner_whenUserIsOwner_shouldReturnTrue() {
-        when(videoRepository.findById(videoId)).thenReturn(Optional.of(userVideo));
-        boolean result = videoSecurityService.isOwner(videoId, ownerUser.getUsername());
+    @DisplayName("✅ isOwner: Should return true if username matches video owner")
+    void isOwner_TrueForOwner() {
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(userVideo));
+        boolean result = videoSecurityService.isOwner(videoId, ownerUsername);
         assertThat(result).isTrue();
-        verify(videoRepository).findById(videoId); // Example verification
+        then(videoRepository).should().findById(videoId);
     }
 
     @Test
-    void isOwner_whenUserIsNotOwner_shouldReturnFalse() {
-        when(videoRepository.findById(videoId)).thenReturn(Optional.of(userVideo));
-        boolean result = videoSecurityService.isOwner(videoId, otherUser.getUsername());
+    @DisplayName("❌ isOwner: Should return false if username does not match video owner")
+    void isOwner_FalseForNonOwner() {
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(userVideo));
+        boolean result = videoSecurityService.isOwner(videoId, otherUsername);
         assertThat(result).isFalse();
-        verify(videoRepository).findById(videoId);
+        then(videoRepository).should().findById(videoId);
     }
 
     @Test
-    void isOwner_whenVideoNotFound_shouldReturnFalse() {
-        when(videoRepository.findById(nonExistentVideoId)).thenReturn(Optional.empty());
-        boolean result = videoSecurityService.isOwner(nonExistentVideoId, ownerUser.getUsername());
+    @DisplayName("❌ isOwner: Should return false if video not found")
+    void isOwner_FalseVideoNotFound() {
+        given(videoRepository.findById(videoId)).willReturn(Optional.empty());
+        boolean result = videoSecurityService.isOwner(videoId, ownerUsername);
         assertThat(result).isFalse();
-        verify(videoRepository).findById(nonExistentVideoId);
+        then(videoRepository).should().findById(videoId);
     }
 
+    @Test
+    @DisplayName("❌ isOwner: Should return false for null username")
+    void isOwner_FalseNullUsername() {
+        boolean result = videoSecurityService.isOwner(videoId, null);
+        assertThat(result).isFalse();
+        then(videoRepository).shouldHaveNoInteractions();
+    }
 
     @Test
-    void canView_whenUserIsOwner_shouldReturnTrue() {
-        when(videoRepository.findById(videoId)).thenReturn(Optional.of(userVideo));
-        boolean result = videoSecurityService.canView(videoId, ownerUser.getUsername());
+    @DisplayName("❌ isOwner: Should return false for null videoId")
+    void isOwner_FalseNullVideoId() {
+        boolean result = videoSecurityService.isOwner(null, ownerUsername);
+        assertThat(result).isFalse();
+        then(videoRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("✅ canView: Should return true if user is owner")
+    void canView_TrueForOwner() {
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(userVideo));
+        boolean result = videoSecurityService.canView(videoId, ownerUsername);
         assertThat(result).isTrue();
-        verify(videoRepository).findById(videoId); // Verify findById was called (via isOwner)
     }
 
     @Test
-    void canView_whenUserIsNotOwner_shouldReturnFalse() {
-        when(videoRepository.findById(videoId)).thenReturn(Optional.of(userVideo));
-        boolean result = videoSecurityService.canView(videoId, otherUser.getUsername());
+    @DisplayName("❌ canView: Should return false if user is not owner")
+    void canView_FalseForNonOwner() {
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(userVideo));
+        boolean result = videoSecurityService.canView(videoId, otherUsername);
         assertThat(result).isFalse();
-        verify(videoRepository).findById(videoId); // Verify findById was called (via isOwner)
     }
 
     @Test
-    void canView_whenVideoNotFound_shouldReturnFalse() {
-        when(videoRepository.findById(nonExistentVideoId)).thenReturn(Optional.empty());
-        boolean result = videoSecurityService.canView(nonExistentVideoId, ownerUser.getUsername());
-        assertThat(result).isFalse();
-        verify(videoRepository).findById(nonExistentVideoId); // Verify findById was called (via isOwner)
-    }
-
-    @Test
-    void canDelete_whenUserIsOwner_shouldReturnTrue() {
-        when(videoRepository.findById(videoId)).thenReturn(Optional.of(userVideo));
-        boolean result = videoSecurityService.canDelete(videoId, ownerUser.getUsername());
+    @DisplayName("✅ canDelete: Should return true if user is owner")
+    void canDelete_TrueForOwner() {
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(userVideo));
+        boolean result = videoSecurityService.canDelete(videoId, ownerUsername);
         assertThat(result).isTrue();
-        verify(videoRepository).findById(videoId);
     }
 
     @Test
-    void canDelete_whenUserIsNotOwner_shouldReturnFalse() {
-        when(videoRepository.findById(videoId)).thenReturn(Optional.of(userVideo));
-        boolean result = videoSecurityService.canDelete(videoId, otherUser.getUsername());
+    @DisplayName("❌ canDelete: Should return false if user is not owner")
+    void canDelete_FalseForNonOwner() {
+        given(videoRepository.findById(videoId)).willReturn(Optional.of(userVideo));
+        boolean result = videoSecurityService.canDelete(videoId, otherUsername);
         assertThat(result).isFalse();
-        verify(videoRepository).findById(videoId);
-    }
-
-    @Test
-    void canDelete_whenVideoNotFound_shouldReturnFalse() {
-        when(videoRepository.findById(nonExistentVideoId)).thenReturn(Optional.empty());
-        boolean result = videoSecurityService.canDelete(nonExistentVideoId, ownerUser.getUsername());
-        assertThat(result).isFalse();
-        verify(videoRepository).findById(nonExistentVideoId);
     }
 }

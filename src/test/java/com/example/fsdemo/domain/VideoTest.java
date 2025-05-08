@@ -13,7 +13,7 @@ class VideoTest {
     void defaultConstructor() {
         Video video = new Video();
         assertThat(video).isNotNull();
-        assertThat(video.getStatus()).isEqualTo(Video.VideoStatus.UPLOADED); // Default value check
+        assertThat(video.getStatus()).isEqualTo(Video.VideoStatus.UPLOADED);
     }
 
     @Test
@@ -21,23 +21,22 @@ class VideoTest {
     void parameterizedConstructor() {
         AppUser owner = new AppUser("owner", "pass", "USER", "owner@example.com");
         owner.setId(1L);
-        String filename = "video-uuid.mp4";
         String desc = "Test Description";
         Instant now = Instant.now();
         String storagePath = "storage/video-uuid.mp4";
         Long size = 1024L;
         String mime = "video/mp4";
 
-        Video video = new Video(owner, filename, desc, now, storagePath, size, mime);
+        Video video = new Video(owner, desc, now, storagePath, size, mime);
 
         assertThat(video.getOwner()).isEqualTo(owner);
-        assertThat(video.getGeneratedFilename()).isEqualTo(filename);
         assertThat(video.getDescription()).isEqualTo(desc);
         assertThat(video.getUploadDate()).isEqualTo(now);
         assertThat(video.getStoragePath()).isEqualTo(storagePath);
         assertThat(video.getFileSize()).isEqualTo(size);
         assertThat(video.getMimeType()).isEqualTo(mime);
-        assertThat(video.getStatus()).isEqualTo(Video.VideoStatus.UPLOADED); // Constructor default
+        assertThat(video.getStatus()).isEqualTo(Video.VideoStatus.UPLOADED);
+        assertThat(video.getPublicId()).isNotNull().isNotEmpty();
         assertThat(video.getId()).isNull();
         assertThat(video.getProcessedStoragePath()).isNull();
         assertThat(video.getDuration()).isNull();
@@ -58,7 +57,6 @@ class VideoTest {
         video.setProcessedStoragePath(processedPath);
         video.setDuration(duration);
         video.setStatus(status);
-        // Cannot set owner, generatedFilename, uploadDate, storagePath, fileSize, mimeType via setters easily
 
         assertThat(video.getId()).isEqualTo(id);
         assertThat(video.getDescription()).isEqualTo(desc);
