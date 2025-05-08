@@ -13,7 +13,7 @@ class AppUserTest {
     void defaultConstructor() {
         AppUser user = new AppUser();
         assertThat(user).isNotNull();
-        assertThat(user.isVerified()).isFalse(); // Default value check
+        assertThat(user.isVerified()).isFalse();
     }
 
     @Test
@@ -29,8 +29,8 @@ class AppUserTest {
         assertThat(user.getPassword()).isEqualTo(password);
         assertThat(user.getRole()).isEqualTo(role);
         assertThat(user.getEmail()).isEqualTo(email);
-        assertThat(user.isVerified()).isFalse(); // Constructor default
-        assertThat(user.getId()).isNull(); // Not set by constructor
+        assertThat(user.isVerified()).isFalse();
+        assertThat(user.getId()).isNull();
         assertThat(user.getVerificationTokenHash()).isNull();
         assertThat(user.getVerificationTokenExpiryDate()).isNull();
     }

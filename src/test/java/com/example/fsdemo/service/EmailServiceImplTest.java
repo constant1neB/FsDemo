@@ -36,7 +36,7 @@ class EmailServiceImplTest {
 
     private AppUser testUser;
     private final String testToken = "test-verification-token-123";
-    private final String testBaseUrl = "http://localhost:8080/api/auth";
+    private final String testBaseUrl = "http://localhost:8080";
     private final String fromAddress = "noreply@test.com";
 
     @BeforeEach
@@ -44,11 +44,8 @@ class EmailServiceImplTest {
         testUser = new AppUser("tester", "pass", "USER", "recipient@example.com");
         testUser.setId(1L);
 
-        // Inject the 'fromAddress' using reflection
         ReflectionTestUtils.setField(emailService, "fromAddress", fromAddress);
 
-        // Mock createMimeMessage() to return a real MimeMessage (or a mock if needed)
-        // Using a real one allows checking properties set via MimeMessageHelper
         MimeMessage mimeMessage = new MimeMessage((Session) null);
         given(mailSender.createMimeMessage()).willReturn(mimeMessage);
     }
@@ -56,25 +53,19 @@ class EmailServiceImplTest {
     @Test
     @DisplayName("✅ sendVerificationEmail should construct and send correct email")
     void sendVerificationEmail_Success() throws MessagingException, IOException {
-        // Arrange
         doNothing().when(mailSender).send(any(MimeMessage.class));
-        String expectedVerificationUrl = testBaseUrl + "/verify-email?token=" + testToken;
+        String expectedVerificationUrl = testBaseUrl + "/api/auth/verify-email?token=" + testToken;
 
-        // Act
         emailService.sendVerificationEmail(testUser, testToken, testBaseUrl);
 
-        // Assert
-        // Verify mailSender.send was called once with the captured MimeMessage
         then(mailSender).should().send(mimeMessageCaptor.capture());
         MimeMessage sentMessage = mimeMessageCaptor.getValue();
 
-        // Verify email properties
         assertThat(sentMessage.getAllRecipients()).hasSize(1);
         assertThat(sentMessage.getAllRecipients()[0]).hasToString(testUser.getEmail());
         assertThat(sentMessage.getSubject()).isEqualTo("Please Verify Your Email Address");
         assertThat(sentMessage.getFrom()[0]).hasToString(fromAddress);
 
-        // Check content (basic check for key elements)
         String content = (String) sentMessage.getContent();
         assertThat(content)
                 .contains("<h2>Welcome to FsDemo!</h2>")
@@ -89,30 +80,19 @@ class EmailServiceImplTest {
         doThrow(new MailSendException("Failed to connect to mail server"))
                 .when(mailSender).send(any(MimeMessage.class));
 
-        // Act
-        // Since it's @Async, the exception is caught by the AsyncUncaughtExceptionHandler
-        // We test that send was called, and assume the handler logs it (can't easily verify log output here)
         emailService.sendVerificationEmail(testUser, testToken, testBaseUrl);
 
-        // Assert
-        // Verify send was attempted
         then(mailSender).should().send(any(MimeMessage.class));
-        // We expect the exception to be logged by the async handler, not rethrown here.
     }
 
     @Test
     @DisplayName("❌ sendVerificationEmail should log error if message setup fails (Simulated MailException)")
     void sendVerificationEmail_FailureSetupSimulatedAsMailException() {
-        // Arrange
-        // Simulate a setup failure by throwing an unchecked MailException during send
         doThrow(new MailSendException("Simulated setup failure: Invalid address"))
                 .when(mailSender).send(any(MimeMessage.class));
 
-        // Act
         emailService.sendVerificationEmail(testUser, testToken, testBaseUrl);
 
-        // Assert
         then(mailSender).should().send(any(MimeMessage.class));
-        // Logging is handled by AsyncUncaughtExceptionHandler, verification stops here.
     }
 }

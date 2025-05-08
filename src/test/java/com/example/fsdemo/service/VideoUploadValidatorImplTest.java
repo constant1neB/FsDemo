@@ -21,7 +21,7 @@ import static org.mockito.Mockito.when;
 class VideoUploadValidatorImplTest {
 
     private VideoUploadValidatorImpl validator;
-    private final long maxFileSizeMb = 5; // 5 MB for testing
+    private final long maxFileSizeMb = 5;
     private final long maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
 
     // Valid MP4 magic bytes structure (simplified for test)
@@ -190,7 +190,6 @@ class VideoUploadValidatorImplTest {
             when(mockFile.getSize()).thenReturn(1024L); // Valid size
             when(mockFile.getOriginalFilename()).thenReturn("io_error.mp4");
             when(mockFile.getContentType()).thenReturn("video/mp4");
-            // Simulate IOException when trying to read the stream
             when(mockFile.getInputStream()).thenThrow(new IOException("Simulated read error"));
 
             assertThatThrownBy(() -> validator.validate(mockFile))

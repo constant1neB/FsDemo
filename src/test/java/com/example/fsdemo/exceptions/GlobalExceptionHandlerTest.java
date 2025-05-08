@@ -62,12 +62,9 @@ class GlobalExceptionHandlerTest {
 
     @BeforeEach
     void setUp() {
-        // Mock the WebRequest to return a URI for the 'instance' field
         when(webRequest.getDescription(false)).thenReturn(requestUri);
         defaultHeaders = new HttpHeaders();
     }
-
-    // --- Custom Application Exceptions ---
 
     @Nested
     @DisplayName("VideoStorageException Handling")
@@ -81,7 +78,7 @@ class GlobalExceptionHandlerTest {
 
             assertThat(problemDetail).isNotNull();
             assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.value());
-            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase()); // FIX: Expect standard title
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase());
             assertThat(problemDetail.getDetail()).isEqualTo("Failed to process video storage operation. Please contact support if the problem persists.");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties())
@@ -89,8 +86,6 @@ class GlobalExceptionHandlerTest {
                     .extracting("timestamp").isInstanceOf(Instant.class);
         }
     }
-
-    // --- Spring Security Exceptions ---
 
     @Nested
     @DisplayName("AccessDeniedException Handling")
@@ -104,7 +99,7 @@ class GlobalExceptionHandlerTest {
 
             assertThat(problemDetail).isNotNull();
             assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.FORBIDDEN.value());
-            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.FORBIDDEN.getReasonPhrase()); // Expect standard title
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.FORBIDDEN.getReasonPhrase());
             assertThat(problemDetail.getDetail()).isEqualTo("Access Denied. You do not have sufficient permissions to access this resource.");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -117,22 +112,19 @@ class GlobalExceptionHandlerTest {
         @Test
         @DisplayName("Should return 401 Unauthorized with correct ProblemDetail")
         void handleAuthenticationException() {
-            AuthenticationException ex = new BadCredentialsException("Bad credentials"); // Example implementation
+            AuthenticationException ex = new BadCredentialsException("Bad credentials");
 
             ProblemDetail problemDetail = globalExceptionHandler.handleAuthenticationException(ex, webRequest);
 
             assertThat(problemDetail).isNotNull();
             assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED.value());
-            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.UNAUTHORIZED.getReasonPhrase()); // Expect standard title
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.UNAUTHORIZED.getReasonPhrase());
             assertThat(problemDetail.getDetail()).isEqualTo("Authentication failed. Please check your credentials or log in.");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
         }
     }
 
-    // --- Bean Validation Exceptions ---
-
-    // Helper DTO for validation tests
     private record TestDto(@NotBlank String name, @Size(min = 5) String value) {
     }
 
@@ -142,17 +134,16 @@ class GlobalExceptionHandlerTest {
         @Test
         @DisplayName("Should return 400 Bad Request with validation errors")
         void handleConstraintViolationException() {
-            // Simulate a ConstraintViolationException
             try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
                 Validator validator = factory.getValidator();
-                Set<ConstraintViolation<TestDto>> violations = validator.validate(new TestDto("Test", "123")); // "value" is too short
+                Set<ConstraintViolation<TestDto>> violations = validator.validate(new TestDto("Test", "123"));
                 ConstraintViolationException ex = new ConstraintViolationException("Validation failed", violations);
 
                 ProblemDetail problemDetail = globalExceptionHandler.handleConstraintViolationException(ex, webRequest);
 
                 assertThat(problemDetail).isNotNull();
                 assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST.value());
-                assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.BAD_REQUEST.getReasonPhrase()); // FIX: Expect standard title
+                assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.BAD_REQUEST.getReasonPhrase());
                 assertThat(problemDetail.getDetail()).isEqualTo("Input validation failed. Check the 'errors' field for details.");
                 assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
                 assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -163,14 +154,12 @@ class GlobalExceptionHandlerTest {
                 assertThat(errors).hasSize(1);
                 assertThat(errors.get("value"))
                         .isIn(
-                                "size must be between 5 and 2147483647", // English
-                                "размер должен находиться в диапазоне от 5 до 2147483647" // Russian
+                                "size must be between 5 and 2147483647",
+                                "размер должен находиться в диапазоне от 5 до 2147483647"
                         );
             }
         }
     }
-
-    // --- General Spring Web Exceptions (Overrides) ---
 
     @Nested
     @DisplayName("MethodArgumentNotValidException Handling")
@@ -178,13 +167,13 @@ class GlobalExceptionHandlerTest {
         @Test
         @DisplayName("Should return 400 Bad Request with validation errors from @Valid")
         void handleMethodArgumentNotValid() throws NoSuchMethodException {
-            // Simulate MethodArgumentNotValidException
             BindingResult bindingResult = mock(BindingResult.class);
-            FieldError fieldError = new FieldError("testDto", "name", null, false, null, null, "must not be blank");
+            FieldError fieldError = new FieldError("testDto", "name", null,
+                    false, null, null, "must not be blank");
             when(bindingResult.getAllErrors()).thenReturn(List.of(fieldError));
 
-            // Need a MethodParameter for the exception constructor
-            MethodParameter parameter = new MethodParameter(this.getClass().getDeclaredMethod("dummyMethod", TestDto.class), 0);
+            MethodParameter parameter = new MethodParameter(this.getClass().getDeclaredMethod("dummyMethod",
+                    TestDto.class), 0);
             MethodArgumentNotValidException ex = new MethodArgumentNotValidException(parameter, bindingResult);
 
             ResponseEntity<Object> responseEntity = globalExceptionHandler.handleMethodArgumentNotValid(
@@ -196,7 +185,7 @@ class GlobalExceptionHandlerTest {
 
             ProblemDetail problemDetail = (ProblemDetail) responseEntity.getBody();
             assert problemDetail != null;
-            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.BAD_REQUEST.getReasonPhrase()); // FIX: Expect standard title
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.BAD_REQUEST.getReasonPhrase());
             assertThat(problemDetail.getDetail()).isEqualTo("Request body validation failed. Check the 'errors' field for details.");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -233,7 +222,7 @@ class GlobalExceptionHandlerTest {
 
             ProblemDetail problemDetail = (ProblemDetail) responseEntity.getBody();
             assert problemDetail != null;
-            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED.getReasonPhrase()); // Expect standard title
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED.getReasonPhrase());
             assertThat(problemDetail.getDetail()).isEqualTo(ex.getMessage());
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -259,7 +248,7 @@ class GlobalExceptionHandlerTest {
 
             ProblemDetail problemDetail = (ProblemDetail) responseEntity.getBody();
             assert problemDetail != null;
-            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE.getReasonPhrase()); // Expect standard title
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE.getReasonPhrase());
             assertThat(problemDetail.getDetail()).isEqualTo(ex.getMessage());
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -284,7 +273,7 @@ class GlobalExceptionHandlerTest {
 
             ProblemDetail problemDetail = (ProblemDetail) responseEntity.getBody();
             assert problemDetail != null;
-            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.BAD_REQUEST.getReasonPhrase()); // FIX: Expect standard title
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.BAD_REQUEST.getReasonPhrase());
             assertThat(problemDetail.getDetail()).isEqualTo(ex.getMessage());
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -303,7 +292,7 @@ class GlobalExceptionHandlerTest {
 
             assertThat(problemDetail).isNotNull();
             assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.NOT_FOUND.value());
-            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.NOT_FOUND.getReasonPhrase()); // FIX: Expect standard title
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.NOT_FOUND.getReasonPhrase());
             assertThat(problemDetail.getDetail()).isEqualTo("Resource Not Found");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -318,14 +307,12 @@ class GlobalExceptionHandlerTest {
 
             assertThat(problemDetail).isNotNull();
             assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.NOT_MODIFIED.value());
-            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.NOT_MODIFIED.getReasonPhrase()); // FIX: Expect standard title
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.NOT_MODIFIED.getReasonPhrase());
             assertThat(problemDetail.getDetail()).isEqualTo("Resource Not Modified");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
         }
     }
-
-    // --- Generic Fallback Handler ---
 
     @Nested
     @DisplayName("Generic Exception Handling")
@@ -333,13 +320,13 @@ class GlobalExceptionHandlerTest {
         @Test
         @DisplayName("Should return 500 Internal Server Error with generic message for unhandled Exception")
         void handleGenericException() {
-            Exception ex = new IOException("Disk read error"); // Example generic exception
+            Exception ex = new IOException("Disk read error");
 
             ProblemDetail problemDetail = globalExceptionHandler.handleGenericException(ex, webRequest);
 
             assertThat(problemDetail).isNotNull();
             assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.value());
-            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase()); // Expect standard title
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase());
             assertThat(problemDetail.getDetail()).isEqualTo("An unexpected internal error occurred. Please try again later or contact support.");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -354,14 +341,12 @@ class GlobalExceptionHandlerTest {
 
             assertThat(problemDetail).isNotNull();
             assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.value());
-            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase()); // Expect standard title
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase());
             assertThat(problemDetail.getDetail()).isEqualTo("An unexpected internal error occurred. Please try again later or contact support.");
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create(requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
         }
     }
-
-    // --- handleExceptionInternal Override Tests ---
 
     @Nested
     @DisplayName("handleExceptionInternal Override")
@@ -371,12 +356,11 @@ class GlobalExceptionHandlerTest {
         @DisplayName("Should handle MaxUploadSizeExceededException correctly")
         void handleMaxUploadSizeExceededException() {
             MaxUploadSizeExceededException ex = new MaxUploadSizeExceededException(1024L);
-            // Mock the ServletWebRequest to simulate the environment where this might be caught
             MockHttpServletRequest servletRequest = new MockHttpServletRequest("POST", requestUri);
             ServletWebRequest servletWebRequest = new ServletWebRequest(servletRequest);
 
             ResponseEntity<Object> responseEntity = globalExceptionHandler.handleExceptionInternal(
-                    ex, null, defaultHeaders, HttpStatus.PAYLOAD_TOO_LARGE, servletWebRequest); // Status might be determined by Spring before this call
+                    ex, null, defaultHeaders, HttpStatus.PAYLOAD_TOO_LARGE, servletWebRequest);
 
             assertThat(responseEntity).isNotNull();
             assertThat(responseEntity.getStatusCode()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
@@ -384,9 +368,9 @@ class GlobalExceptionHandlerTest {
 
             ProblemDetail problemDetail = (ProblemDetail) responseEntity.getBody();
             assert problemDetail != null;
-            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE.getReasonPhrase()); // FIX: Expect standard title
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE.getReasonPhrase());
             assertThat(problemDetail.getDetail()).contains("Maximum upload size exceeded");
-            assertThat(problemDetail.getInstance()).isEqualTo(URI.create("uri=" + requestUri)); // Uses the URI from the ServletWebRequest
+            assertThat(problemDetail.getInstance()).isEqualTo(URI.create("uri=" + requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
         }
 
@@ -408,7 +392,7 @@ class GlobalExceptionHandlerTest {
 
             ProblemDetail problemDetail = (ProblemDetail) responseEntity.getBody();
             assert problemDetail != null;
-            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase()); // FIX: Expect standard title
+            assertThat(problemDetail.getTitle()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase());
             assertThat(problemDetail.getDetail()).isEqualTo(ex.getMessage());
             assertThat(problemDetail.getInstance()).isEqualTo(URI.create("uri=" + requestUri));
             assertThat(problemDetail.getProperties()).containsKey("timestamp");
@@ -422,28 +406,25 @@ class GlobalExceptionHandlerTest {
             MockHttpServletRequest servletRequest = new MockHttpServletRequest("GET", requestUri);
             ServletWebRequest servletWebRequest = new ServletWebRequest(servletRequest);
 
-            // Create a pre-existing ProblemDetail
             ProblemDetail existingProblemDetail = ProblemDetail.forStatusAndDetail(status, "Pre-existing detail");
-            existingProblemDetail.setTitle("Custom Title"); // Keep custom title if provided
-            // Intentionally omit timestamp and instance
+            existingProblemDetail.setTitle("Custom Title");
 
             ResponseEntity<Object> responseEntity = globalExceptionHandler.handleExceptionInternal(
-                    ex, existingProblemDetail, defaultHeaders, status, servletWebRequest); // Pass existing PD as body
+                    ex, existingProblemDetail, defaultHeaders, status, servletWebRequest);
 
             assertThat(responseEntity).isNotNull();
             assertThat(responseEntity.getStatusCode()).isEqualTo(status);
-            assertThat(responseEntity.getBody()).isSameAs(existingProblemDetail); // Should return the same instance
+            assertThat(responseEntity.getBody()).isSameAs(existingProblemDetail);
 
             ProblemDetail problemDetail = (ProblemDetail) responseEntity.getBody();
             assert problemDetail != null;
-            assertThat(problemDetail.getTitle()).isEqualTo("Custom Title"); // Keeps existing title
-            assertThat(problemDetail.getDetail()).isEqualTo("Pre-existing detail"); // Keeps existing detail
-            assertThat(problemDetail.getInstance()).isEqualTo(URI.create("uri=" + requestUri)); // Adds instance if missing
-            assertThat(problemDetail.getProperties()).containsKey("timestamp"); // Adds timestamp if missing
+            assertThat(problemDetail.getTitle()).isEqualTo("Custom Title");
+            assertThat(problemDetail.getDetail()).isEqualTo("Pre-existing detail");
+            assertThat(problemDetail.getInstance()).isEqualTo(URI.create("uri=" + requestUri));
+            assertThat(problemDetail.getProperties()).containsKey("timestamp");
         }
     }
 
-    // --- Helper Method Tests ---
     @Nested
     @DisplayName("Helper Method Tests")
     class HelperMethodTests {
@@ -451,12 +432,9 @@ class GlobalExceptionHandlerTest {
         @Test
         @DisplayName("getReasonPhrase should return standard phrase for HttpStatus")
         void getReasonPhrase_HttpStatus() {
-            // Use ReflectionTestUtils to invoke the private method
             String phrase = ReflectionTestUtils.invokeMethod(globalExceptionHandler, "getReasonPhrase", HttpStatus.NOT_FOUND);
             assertThat(phrase).isEqualTo(HttpStatus.NOT_FOUND.getReasonPhrase());
         }
-
-        // Removed tests attempting to mock HttpStatusCode as it fails with inline mock maker
 
         @ParameterizedTest
         @ValueSource(strings = {"field", "object.field", "list[0].field", "map[key]", "complex.list[1].map[key].finalField"})
@@ -466,32 +444,28 @@ class GlobalExceptionHandlerTest {
             switch (input) {
                 case "field", "object.field", "list[0].field" -> assertThat(actual).isEqualTo("field");
                 case "map[key]" ->
-                    // Based on the implementation: lastIndexOf('.') is -1, lastIndexOf('[') finds '[', returns substring after '['
                         assertThat(actual).isEqualTo("key]");
                 case "complex.list[1].map[key].finalField" ->
-                    // lastIndexOf('.') is at 'key].', lastIndexOf('[') is at map[key], '.' is later
                         assertThat(actual).isEqualTo("finalField");
                 default ->
-                    // Default case if none match - useful for debugging if new cases are added
                         assertThat(actual).isEqualTo(input.substring(Math.max(input.lastIndexOf('.'), input.lastIndexOf('[')) + 1));
             }
         }
 
         @ParameterizedTest
-        @ValueSource(strings = {""}) // Test only empty string
-        @NullSource // Test null separately
+        @ValueSource(strings = {""})
+        @NullSource
         @DisplayName("getPropertyName should return 'unknown' for null or empty input")
         void getPropertyName_NullOrEmpty(String input) {
             String actual = ReflectionTestUtils.invokeMethod(globalExceptionHandler, "getPropertyName", input);
             assertThat(actual).isEqualTo("unknown");
         }
 
-        @Test // Separate test for blank string
+        @Test
         @DisplayName("getPropertyName should return blank string for blank input (current behavior)")
         void getPropertyName_Blank() {
             String input = " ";
             String actual = ReflectionTestUtils.invokeMethod(globalExceptionHandler, "getPropertyName", input);
-            // Asserting the current behavior where blank is returned as is
             assertThat(actual).isEqualTo(" ");
         }
     }

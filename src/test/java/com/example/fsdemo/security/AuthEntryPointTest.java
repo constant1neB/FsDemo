@@ -48,39 +48,33 @@ class AuthEntryPointTest {
     private HttpServletResponse errorResponseMock;
 
     @Mock
-    private PrintWriter writerMock; // Mock the writer for the error case
+    private PrintWriter writerMock;
 
     @Autowired
-    private ObjectMapper objectMapper; // Inject the real ObjectMapper
+    private ObjectMapper objectMapper;
 
     private AuthEntryPoint authEntryPoint;
 
     @BeforeEach
     void setUp() {
-        // Manually instantiate with the autowired ObjectMapper
         authEntryPoint = new AuthEntryPoint(objectMapper);
     }
 
     @Test
     @DisplayName("commence should set 401 status, correct headers, and write ProblemDetail JSON")
     void commence_setsCorrectStatusHeadersAndBody() throws IOException {
-        // --- Arrange ---
         String requestUri = "/api/protected/resource";
         AuthenticationException authException = new BadCredentialsException("Invalid credentials provided");
         StringWriter stringWriter = new StringWriter();
         PrintWriter printWriter = new PrintWriter(stringWriter);
 
         when(request.getRequestURI()).thenReturn(requestUri);
-        // Stub the getWriter() method on the spy to return our PrintWriter
         doReturn(printWriter).when(responseSpy).getWriter();
 
-        // --- Act ---
         authEntryPoint.commence(request, responseSpy, authException);
 
-        // --- Assert ---
         verify(responseSpy).setStatus(HttpStatus.UNAUTHORIZED.value());
         verify(responseSpy).setCharacterEncoding(StandardCharsets.UTF_8.name());
-        // Use startsWith for Content-Type assertion
         verify(responseSpy).setContentType(startsWith(MediaType.APPLICATION_PROBLEM_JSON_VALUE));
 
         String jsonResponse = stringWriter.toString();
@@ -102,9 +96,9 @@ class AuthEntryPointTest {
             timestamp = Instant.parse((String) timestampValue);
         } else if (timestampValue instanceof Number) {
             long epochMillis = ((Number) timestampValue).longValue();
-            if (String.valueOf(epochMillis).length() > 10) { // Simple check for millis vs seconds
+            if (String.valueOf(epochMillis).length() > 10) {
                 timestamp = Instant.ofEpochMilli(epochMillis);
-            } else { // Assume seconds
+            } else {
                 timestamp = Instant.ofEpochSecond(epochMillis);
             }
         } else {
@@ -117,11 +111,9 @@ class AuthEntryPointTest {
     @Test
     @DisplayName("commence should handle IOException during response writing gracefully (logs error)")
     void commence_handlesIOExceptionDuringWrite() throws IOException {
-        // --- Arrange ---
         String requestUri = "/api/error/resource";
         AuthenticationException authException = new BadCredentialsException("Auth error");
 
-        // Use the mock response and mock writer
         when(request.getRequestURI()).thenReturn(requestUri);
         when(errorResponseMock.getWriter()).thenReturn(writerMock);
 
@@ -129,20 +121,15 @@ class AuthEntryPointTest {
         doThrow(new IOException("Simulated write error"))
                 .when(writerMock).write(any(char[].class), anyInt(), anyInt());
 
-        // --- Act & Assert ---
-        // Use the authEntryPoint instance with the real ObjectMapper
         assertThatCode(() -> authEntryPoint.commence(request, errorResponseMock, authException))
-                .doesNotThrowAnyException(); // Verify the exception is caught internally
+                .doesNotThrowAnyException();
 
-        // Verify that the response setters were still called
         verify(errorResponseMock).setStatus(HttpStatus.UNAUTHORIZED.value());
         verify(errorResponseMock).setCharacterEncoding(StandardCharsets.UTF_8.name());
         verify(errorResponseMock).setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
 
-        // Verify that getWriter was called to get the writer
         verify(errorResponseMock).getWriter();
 
-        // Verify that the writer's write method was called (which triggered the exception)
         verify(writerMock).write(any(char[].class), anyInt(), anyInt());
     }
 }

@@ -89,7 +89,8 @@ class VideoStatusUpdaterImplTest {
         testVideo.setStatus(VideoStatus.PROCESSING);
         given(videoRepository.findById(videoId)).willReturn(Optional.of(testVideo));
 
-        statusUpdater.updateStatusToProcessing(videoId);
+        assertThatCode(() -> statusUpdater.updateStatusToProcessing(videoId))
+                .doesNotThrowAnyException();
 
         then(videoRepository).should(never()).save(any(Video.class));
         then(videoStorageService).should(never()).delete(anyString());

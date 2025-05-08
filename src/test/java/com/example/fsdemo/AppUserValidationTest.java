@@ -91,21 +91,20 @@ class AppUserValidationTest {
 
     @Test
     void whenPasswordIsMinLength_thenNoViolation() {
-        String minLengthPassword = "a".repeat(12); // Password exactly 12 characters
+        String minLengthPassword = "a".repeat(12);
         AppUser user = new AppUser("validuser", minLengthPassword, "USER", "test@example.com");
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
-        assertThat(violations).isEmpty(); // Should be valid
+        assertThat(violations).isEmpty();
     }
 
     @Test
     void whenPasswordIsMaxLength_thenNoViolation() {
-        String maxLengthPassword = "a".repeat(70); // Password exactly 70 characters
+        String maxLengthPassword = "a".repeat(70);
         AppUser user = new AppUser("validuser", maxLengthPassword, "USER", "test@example.com");
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
-        assertThat(violations).isEmpty(); // Should be valid
+        assertThat(violations).isEmpty();
     }
 
-    // --- Role Tests ---
     @Test
     void whenRoleIsNull_thenViolation() {
         AppUser user = new AppUser("validuser", "ValidPass123", null, "test@example.com");
@@ -115,10 +114,8 @@ class AppUserValidationTest {
         assertThat(violations.iterator().next().getMessage()).contains("blank");
     }
 
-    // --- Email Tests ---
     @Test
     void whenEmailIsNull_thenViolation() {
-        // Note: Email is nullable in DB, but let's assume it's required for registration/update
         AppUser user = new AppUser("validuser", "ValidPass123", "USER", null);
         Set<ConstraintViolation<AppUser>> violations = validator.validate(user);
         assertThat(violations).isNotEmpty()
