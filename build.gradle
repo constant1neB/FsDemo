@@ -2,6 +2,7 @@ plugins {
 	id 'java'
 	id 'org.springframework.boot' version '3.4.4'
 	id 'io.spring.dependency-management' version '1.1.7'
+	id 'idea'
 }
 
 group = 'com.example'
@@ -40,12 +41,54 @@ dependencies {
 	testRuntimeOnly 'com.h2database:h2'
 }
 
-tasks.named('test') {
+sourceSets {
+	unit {
+		java.srcDir 'src/test/unit/java'
+		resources.srcDir 'src/test/unit/resources'
+		compileClasspath += sourceSets.main.output + configurations.testRuntimeClasspath
+		runtimeClasspath += output + compileClasspath
+	}
+	integration {
+		java.srcDir 'src/test/integration/java'
+		resources.srcDir 'src/test/integration/resources'
+		compileClasspath += sourceSets.main.output + configurations.testRuntimeClasspath
+		runtimeClasspath += output + compileClasspath
+	}
+}
+
+idea {
+	module {
+		testSources.from(sourceSets.unit.java.srcDirs, sourceSets.unit.resources.srcDirs)
+		testSources.from(sourceSets.integration.java.srcDirs, sourceSets.integration.resources.srcDirs)
+	}
+}
+
+def commonTestJvmArgs = [
+		"--add-opens=java.base/java.lang=ALL-UNNAMED",
+		"--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+		"--add-opens=java.base/java.util=ALL-UNNAMED"
+]
+
+tasks.named('test', Test) {
+	description = 'Runs unit tests.'
+	group = 'verification'
+	testClassesDirs = sourceSets.unit.output.classesDirs
+	classpath = sourceSets.unit.runtimeClasspath
 	useJUnitPlatform()
-	jvmArgs = [
-			"--add-opens=java.base/java.lang=ALL-UNNAMED",
-			"--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
-			"--add-opens=java.base/java.util=ALL-UNNAMED",
-			"-javaagent:${configurations.testRuntimeClasspath.find { it.name.contains('mockito-core') }}"
-	]
+	jvmArgs = commonTestJvmArgs
+}
+
+tasks.register('integrationTest', Test) {
+	description = 'Runs integration tests.'
+	group = 'verification'
+	testClassesDirs = sourceSets.integration.output.classesDirs
+	classpath = sourceSets.integration.runtimeClasspath
+	useJUnitPlatform()
+	shouldRunAfter tasks.named('test')
+	jvmArgs = commonTestJvmArgs
+}
+
+tasks.named('check') {
+	dependsOn tasks.named('test')
+	dependsOn tasks.named('integrationTest')
 }

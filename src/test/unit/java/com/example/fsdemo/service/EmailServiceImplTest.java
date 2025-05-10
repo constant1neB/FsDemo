@@ -76,7 +76,6 @@ class EmailServiceImplTest {
     @Test
     @DisplayName("❌ sendVerificationEmail should log error if sending fails (MailException)")
     void sendVerificationEmail_FailureMailException() {
-        // Arrange
         doThrow(new MailSendException("Failed to connect to mail server"))
                 .when(mailSender).send(any(MimeMessage.class));
 
