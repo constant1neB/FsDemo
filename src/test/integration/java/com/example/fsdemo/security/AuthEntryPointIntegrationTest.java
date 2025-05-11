@@ -36,7 +36,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 @SpringBootTest
 @DisplayName("AuthEntryPoint Tests")
-class AuthEntryPointTest {
+class AuthEntryPointIntegrationTest {
 
     @Mock
     private HttpServletRequest request;
