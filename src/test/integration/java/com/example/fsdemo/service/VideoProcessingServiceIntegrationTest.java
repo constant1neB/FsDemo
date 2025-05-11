@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.*;
 @ActiveProfiles("test")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-class VideoProcessingServiceImplTest {
+class VideoProcessingServiceIntegrationTest {
 
     @Autowired
     private VideoProcessingService videoProcessingService;

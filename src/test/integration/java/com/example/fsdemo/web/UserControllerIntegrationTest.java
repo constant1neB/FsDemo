@@ -31,7 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @DisplayName("UserController Registration & Verification Integration Tests")
 @TestPropertySource(properties = "app.frontend-base-url=http://test-frontend.url")
-class UserControllerTest {
+class UserControllerIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;

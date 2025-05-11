@@ -58,7 +58,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(VideoController.class)
 @Import({SecurityConfig.class, GlobalExceptionHandler.class, AuthEntryPoint.class})
-class VideoControllerTest {
+class VideoControllerIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
